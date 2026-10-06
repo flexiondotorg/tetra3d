@@ -96,6 +96,9 @@ func writeVertexList(out []ebiten.Vertex, n, start, end int, stamp uint32, stamp
 
 		o.DstX = dx
 		o.DstY = dy
+		// The w of the screen position, for the vertex function of the depth
+		// test inside a part, see sortedVertexSource.
+		o.Custom2 = w
 
 		if dx != dx || dy != dy {
 			b.nan = true

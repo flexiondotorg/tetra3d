@@ -302,6 +302,14 @@ type Camera struct {
 	// Mesh.BuildGPUMesh and RenderMeshes. Defaults to false.
 	GPUMesh bool
 
+	// DepthInParts draws each solid part of the sorted path with a hardware
+	// depth test inside the part, in the depth buffers of the mesh path, and
+	// does not sort its triangles. Transparent and alpha-clip parts, and parts
+	// with a custom depth function, keep the sort. It needs a graphics library
+	// that tests the depth of a triangle draw, see
+	// ebiten.DrawTrianglesShaderOptions.Depth. Defaults to false.
+	DepthInParts bool
+
 	DebugInfo *DebugInfo
 
 	depthShader     *ebiten.Shader
@@ -317,6 +325,10 @@ type Camera struct {
 	depthShaderPose, colorShaderPose   *ebiten.Shader
 	depthShaderBend, colorShaderBend   *ebiten.Shader
 	meshDraws, meshInstances           int
+
+	// The depth and colour shaders of the depth test inside a part, see
+	// sortedVertexSource.
+	depthShaderSorted, colorShaderSorted *ebiten.Shader
 
 	// Visibility check variables
 	cameraForward          Vector3
@@ -554,6 +566,12 @@ func NewCamera(name string, w, h int) *Camera {
 		panic(err)
 	}
 	if cam.colorShaderPose, err = ebiten.NewShader(withGPUPose(base3DShaderSource(""))); err != nil {
+		panic(err)
+	}
+	if cam.depthShaderSorted, err = ebiten.NewShader(withSortedVertex(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
 		panic(err)
 	}
 
@@ -1540,6 +1558,14 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	var listBounds screenBounds
 	listBoundsOn := false
 
+	// partDepthOn is true while the parts of one flush draw with a depth test
+	// inside the part, see DepthInParts.
+	partDepthOn := false
+	if camera.DepthInParts && camera.perspective {
+		c := newGPUClip(camera.Projection(), camera.near, camera.far)
+		draw.sortedClip[0], draw.sortedClip[1] = c.k, c.near
+	}
+
 	render := func(rp renderPair) {
 
 		// startingVertexListIndex := vertexListIndex
@@ -1567,7 +1593,10 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		}
 
 		globalSortingTriangleBucket.sortMode = TriangleSortModeBackToFront
-		if meshPart.Material != nil {
+		if partDepthOn {
+			// The depth test inside the part keeps the nearest triangle.
+			globalSortingTriangleBucket.sortMode = TriangleSortModeNone
+		} else if meshPart.Material != nil {
 			globalSortingTriangleBucket.sortMode = meshPart.Material.TriangleSortMode
 		}
 
@@ -1774,6 +1803,9 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			out.DstX = dx
 			out.DstY = dy
+			// The w of the screen position, for the vertex function of the depth
+			// test inside a part, see sortedVertexSource.
+			out.Custom2 = w
 
 			var uvU, uvV float32
 			uv := vertexUVs[vertexIndex]
@@ -2027,8 +2059,13 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 			} else {
 				shaderOpt := &draw.depthOptions
 				shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture}
+				shaderOpt.Depth = partDepthOn
 
-				camera.depthIntermediate.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShader, shaderOpt)
+				if partDepthOn {
+					camera.depthIntermediate.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShaderSorted, shaderOpt)
+				} else {
+					camera.depthIntermediate.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShader, shaderOpt)
+				}
 			}
 
 			if !model.isTransparent(meshPart) {
@@ -2078,6 +2115,15 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		// In a normal render, Fogless is 1: no fog.
 		colorPassShaderOptions.Uniforms = draw.colorUniforms(world, fogless, camera.RenderNormals)
 
+		// With the depth test inside the part, the colour pass draws the
+		// fragments at the depth that the depth pass kept. A second depth
+		// test in the colour pass would need the GPU to give the same depth in
+		// two programs, which it need not do.
+		draw.depthGate[0] = 0
+		if partDepthOn {
+			draw.depthGate[0] = float32(depthGateSteps) / depthUnits
+		}
+
 		if camera.RenderNormals {
 			colorPassShaderOptions.Images[0] = defaultImg
 			camera.resultNormalTexture.DrawTrianglesShader(normalVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
@@ -2107,9 +2153,17 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 						colorPassShaderOptions.Images[3] = mat.FragmentShaderOptions.Images[3]
 					}
 				}
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], mat.fragmentShader, colorPassShaderOptions)
+				shader := mat.fragmentShader
+				if partDepthOn {
+					shader = sortedShaders[shader]
+				}
+				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], shader, colorPassShaderOptions)
 			} else {
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
+				if partDepthOn {
+					camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShaderSorted, colorPassShaderOptions)
+				} else {
+					camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
+				}
 			}
 
 			// camera.resultColorTexture.DrawRectShader(w, h, camera.colorShader, rectShaderOptions)
@@ -2144,9 +2198,11 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 	slices.SortStableFunc(transparents, compareTransparents)
 
-	for _, pass := range [2][]renderPair{solids, transparents} {
+	for passIndex, pass := range [2][]renderPair{solids, transparents} {
 
 		for _, pair := range pass {
+
+			partDepthOn = passIndex == 0 && camera.partDepth(pair.Model, pair.MeshPart)
 
 			// Automatically statically batched models can't render
 			if !pair.Model.visible || pair.Model.AutoBatchMode == AutoBatchStatic {

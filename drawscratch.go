@@ -43,6 +43,11 @@ type drawScratch struct {
 	// gpuBendSource and setBendUniforms, in every map.
 	bendFirst, bendSecond, bendStretch []float32
 
+	// The uniform of the vertex function of the depth test inside a part, in
+	// every map, see sortedVertexSource, and the depth gate of the colour
+	// pass, see base3d.kage.
+	sortedClip, depthGate []float32
+
 	// The parts, the cull uniform, and the options of the mesh path. The
 	// first queued parts of meshDraws come from Camera.QueueMeshes.
 	meshDraws                          []meshDraw
@@ -82,6 +87,8 @@ func newDrawScratch() *drawScratch {
 		bendFirst:             make([]float32, 16),
 		bendSecond:            make([]float32, 16),
 		bendStretch:           make([]float32, 4),
+		sortedClip:            make([]float32, 2),
+		depthGate:             make([]float32, 1),
 	}
 	s.foglessValue = s.fogless
 	s.foglessNormal = []int{1}
@@ -97,12 +104,14 @@ func newDrawScratch() *drawScratch {
 		"TextureMapScreenSizeMultiplierW": s.textureMapScreenSizeW,
 		"TextureMapScreenSizeMultiplierH": s.textureMapScreenSizeH,
 		"Fogless":                         s.foglessValue,
+		"DepthGate":                       s.depthGate,
 	}
 	s.plainUniforms = map[string]any{
 		"Fog":                   []float32{0, 0, 0, 0},
 		"FogRange":              []float32{0, 1},
 		"PerspectiveCorrection": s.perspectiveCorrection,
 		"Fogless":               s.foglessValue,
+		"DepthGate":             s.depthGate,
 	}
 	s.clipUniforms = map[string]any{
 		"PerspectiveCorrection":           s.perspectiveCorrection,
@@ -119,6 +128,7 @@ func newDrawScratch() *drawScratch {
 		m["GPUVertexTint"] = s.gpuTint
 		m["GPUVertexTexSize"] = s.gpuTexSize
 		m["GPUMeshCull"] = s.meshCull
+		m["SortedClip"] = s.sortedClip
 		m["GPUBendFirst"] = s.bendFirst
 		m["GPUBendSecond"] = s.bendSecond
 		m["GPUBendStretch"] = s.bendStretch
