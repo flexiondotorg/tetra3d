@@ -1104,10 +1104,21 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 
 		backfaceCulling := mat != nil && mat.BackfaceCulling
 
-		for triIndex := meshPart.TriangleStart; triIndex <= meshPart.TriangleEnd; triIndex++ {
+		if len(mesh.triCenters) != len(mesh.Triangles) {
+			mesh.UpdateTriangleData()
+		}
+		// A part with no triangles has TriangleStart above TriangleEnd.
+		triStart, triEnd := meshPart.TriangleStart, meshPart.TriangleEnd+1
+		var triVertexIndices []int32
+		var triCenters []Vector3
+		if triStart < triEnd {
+			triVertexIndices = mesh.triVertexIndices[3*triStart : 3*triEnd]
+			triCenters = mesh.triCenters[triStart:triEnd]
+		}
 
-			tri := mesh.Triangles[triIndex]
-			a, b, c := tri.VertexIndexA, tri.VertexIndexB, tri.VertexIndexC
+		for i := range triCenters {
+
+			a, b, c := triVertexIndices[3*i], triVertexIndices[3*i+1], triVertexIndices[3*i+2]
 
 			if processOnlyVisible {
 
@@ -1162,9 +1173,10 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 
 			} else {
 
-				dx := invertedCamPos.X - tri.Center.X
-				dy := invertedCamPos.Y - tri.Center.Y
-				dz := invertedCamPos.Z - tri.Center.Z
+				center := triCenters[i]
+				dx := invertedCamPos.X - center.X
+				dy := invertedCamPos.Y - center.Y
+				dz := invertedCamPos.Z - center.Z
 				depth = float32(dx*dx + dy*dy + dz*dz)
 
 			}
@@ -1180,7 +1192,7 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 				maxDepth = depth
 			}
 
-			globalSortingTriangleBucket.AddTriangle(tri, depth)
+			globalSortingTriangleBucket.AddTriangle(mesh.Triangles[triStart+i], depth)
 
 			vertexListIndex += 3
 
