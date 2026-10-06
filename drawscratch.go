@@ -34,6 +34,17 @@ type drawScratch struct {
 
 	perspectiveCorrection, textureFilterMode, textureMapMode []int
 
+	// The uniforms of the vertex function of the mesh path, see
+	// setGPUUniforms, in every map. The shaders of the CPU transform have no
+	// such uniforms, and Ebitengine ignores them.
+	gpuMatrix, gpuDepth, gpuTint, gpuTexSize []float32
+
+
+	// The parts, the cull uniform, and the options of the mesh path.
+	meshDraws                          []meshDraw
+	meshCull                           []float32
+	meshDepthOptions, meshColorOptions ebiten.DrawTrianglesShaderOptions
+
 	// foglessValue holds fogless. foglessNormal is the value of Fogless in a
 	// normal render, an int like the literal 1 that it stands for.
 	foglessValue, foglessNormal any
@@ -52,6 +63,11 @@ func newDrawScratch() *drawScratch {
 		textureFilterMode:     make([]int, 1),
 		textureMapMode:        make([]int, 1),
 		fragmentUniforms:      map[string]any{},
+		gpuMatrix:             make([]float32, 16),
+		gpuDepth:              make([]float32, 4),
+		gpuTint:               make([]float32, 4),
+		gpuTexSize:            make([]float32, 2),
+		meshCull:              make([]float32, 4),
 	}
 	s.foglessValue = s.fogless
 	s.foglessNormal = []int{1}
@@ -82,6 +98,18 @@ func newDrawScratch() *drawScratch {
 		"TextureFilterMode":               s.textureFilterMode,
 	}
 	s.clipOptions.Uniforms = s.clipUniforms
+	gpu := map[string]any{}
+	for _, m := range []map[string]any{s.worldUniforms, s.plainUniforms, s.clipUniforms, gpu} {
+		m["GPUVertexMatrix"] = s.gpuMatrix
+		m["GPUVertexDepth"] = s.gpuDepth
+		m["GPUVertexTint"] = s.gpuTint
+		m["GPUVertexTexSize"] = s.gpuTexSize
+		m["GPUMeshCull"] = s.meshCull
+	}
+	s.depthOptions.Uniforms = gpu
+	s.meshDepthOptions.Uniforms = gpu
+	s.meshDepthOptions.Depth = true
+	s.meshColorOptions.Depth = true
 	return s
 }
 
