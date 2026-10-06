@@ -16,8 +16,16 @@ var TextureMapScreenSizeMultiplierH float
 
 var BayerMatrix [16]float
 
+// DepthGate, when it is more than 0, draws only the fragments whose depth is
+// within DepthGate of the depth that the depth pass kept, see
+// Camera.DepthInParts.
+var DepthGate float
+
+// decodeDepth rounds each channel to its byte first, so that an inexact
+// conversion of the bytes to floats cannot move the depth.
 func decodeDepth(rgba vec4) float {
-	return rgba.r + (rgba.g / 255) + (rgba.b / 65025)
+	c := floor(rgba.rgb * 255 + 0.5)
+	return (c.r * 65025 + c.g * 255 + c.b) / 16581375
 }
 
 func OutCirc(v float) float {
@@ -73,7 +81,7 @@ func Fragment(dstPos vec4, srcPos vec2, vc, custom vec4) vec4 {
 
 	depth := imageSrc1UnsafeAt(dstPosToSrcPos(dstPos.xy))
 	
-	if depth.a > 0 {
+	if depth.a > 0 && (DepthGate <= 0 || abs(decodeDepth(depth) - custom.y) <= DepthGate) {
 
 		srcOrigin := imageSrc0Origin()
 		srcSize := imageSrc0Size()
