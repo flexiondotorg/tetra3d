@@ -42,6 +42,25 @@ var globalVertexScreen = make([]Vector2, startingDisplayListSize)
 var globalVertexClipCodes = make([]uint8, startingDisplayListSize)
 var globalVertexScreenValid bool
 
+// indexListIndex is the number of indices in indexList for the next draw,
+// and vertexListIndex is the number of vertices that they use. Camera.Render
+// writes each vertex of a mesh part once: globalVertexSlot holds the place
+// of a vertex in the vertex lists, which is valid when its entry in
+// globalVertexStamp equals globalVertexStampNow.
+var indexListIndex = 0
+var globalVertexSlot = make([]int32, startingDisplayListSize)
+var globalVertexStamp = make([]uint32, startingDisplayListSize)
+var globalVertexStampNow uint32
+
+// nextVertexStamp makes every entry of globalVertexSlot invalid.
+func nextVertexStamp() {
+	globalVertexStampNow++
+	if globalVertexStampNow == 0 {
+		clear(globalVertexStamp)
+		globalVertexStampNow = 1
+	}
+}
+
 // The bits of a clip code.
 const (
 	clipLeft uint8 = 1 << iota
@@ -106,6 +125,11 @@ func growDisplayLists() {
 
 	globalVertexScreen = globalVertexScreen[:cap(globalVertexScreen)]
 	globalVertexClipCodes = globalVertexClipCodes[:cap(globalVertexClipCodes)]
+
+	globalVertexSlot = slices.Grow(globalVertexSlot, len(globalVertexTransforms)-len(globalVertexSlot))
+	globalVertexSlot = globalVertexSlot[:len(globalVertexTransforms)]
+	globalVertexStamp = slices.Grow(globalVertexStamp, len(globalVertexTransforms)-len(globalVertexStamp))
+	globalVertexStamp = globalVertexStamp[:len(globalVertexTransforms)]
 
 	globalSortingTriangleBucket.resizeTriangleCount(len(globalSortingTriangleBucket.unsetTris) * 2)
 
