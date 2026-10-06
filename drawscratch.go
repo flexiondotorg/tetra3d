@@ -43,8 +43,10 @@ type drawScratch struct {
 	// gpuBendSource and setBendUniforms, in every map.
 	bendFirst, bendSecond, bendStretch []float32
 
-	// The parts, the cull uniform, and the options of the mesh path.
+	// The parts, the cull uniform, and the options of the mesh path. The
+	// first queued parts of meshDraws come from Camera.QueueMeshes.
 	meshDraws                          []meshDraw
+	queued                             int
 	rigid                              []rigidPart
 	rigidRecords                       []ebiten.Vertex
 	meshCull                           []float32
