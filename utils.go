@@ -78,6 +78,10 @@ func ExtendBase3DShader(customFragment string) (*ebiten.Shader, error) {
 	if bend, err := ebiten.NewShader(withGPUBend(base3DShaderSource(customFragment))); err == nil {
 		bendShaders[shader] = bend
 	}
+	// The variant for the depth test inside a part, see Camera.DepthInParts.
+	if sorted, err := ebiten.NewShader(withSortedVertex(base3DShaderSource(customFragment))); err == nil {
+		sortedShaders[shader] = sorted
+	}
 	return shader, nil
 }
 
