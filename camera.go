@@ -296,6 +296,12 @@ type Camera struct {
 	// Defaults to 0 (off).
 	VertexSnapping float32
 
+	// GPUMesh draws the solid mesh parts that allow it on the mesh path: the
+	// mesh stays on the GPU, and a hardware depth buffer keeps the nearest
+	// pixel, so the processor neither transforms nor sorts. See
+	// Mesh.BuildGPUMesh and RenderMeshes. Defaults to false.
+	GPUMesh bool
+
 	DebugInfo *DebugInfo
 
 	depthShader     *ebiten.Shader
@@ -305,8 +311,9 @@ type Camera struct {
 
 	// The depth and colour shaders of the mesh path, see gpuMeshSource, and
 	// its draws and instance records since the last Clear.
-	depthShaderMesh, colorShaderMesh *ebiten.Shader
-	meshDraws, meshInstances         int
+	depthShaderMesh, colorShaderMesh   *ebiten.Shader
+	depthShaderRigid, colorShaderRigid *ebiten.Shader
+	meshDraws, meshInstances           int
 
 	// Visibility check variables
 	cameraForward          Vector3
@@ -523,6 +530,12 @@ func NewCamera(name string, w, h int) *Camera {
 		panic(err)
 	}
 	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(base3DShaderSource(""))); err != nil {
+		panic(err)
+	}
+	if cam.depthShaderRigid, err = ebiten.NewShader(withGPURigid(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.colorShaderRigid, err = ebiten.NewShader(withGPURigid(base3DShaderSource(""))); err != nil {
 		panic(err)
 	}
 
@@ -1429,6 +1442,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	// Reusing vectors rather than reallocating for all triangles for all models
 	draw.solids = draw.solids[:0]
 	draw.transparents = draw.transparents[:0]
+	draw.meshDraws = draw.meshDraws[:0]
 
 	cameraPos := camera.WorldPosition()
 
@@ -2097,6 +2111,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 	}
 
+	// The mesh path draws first, so that the sorted path compares against its
+	// depth.
+	draw.groupRigid(camera)
+	camera.drawMeshes(scene, draw.meshDraws)
+	clear(draw.meshDraws)
+
 	slices.SortStableFunc(transparents, compareTransparents)
 
 	for _, pass := range [2][]renderPair{solids, transparents} {
@@ -2220,6 +2240,11 @@ func (camera *Camera) addModel(scene *Scene, draw *drawScratch, cameraPos Vector
 			for _, mp := range model.mesh.MeshParts {
 
 				if !mp.isVisible() {
+					continue
+				}
+
+				if model.AutoBatchMode != AutoBatchStatic && camera.gpuMeshPart(model, mp, partLighting(scene, model, mp.Material)) {
+					draw.rigid = append(draw.rigid, rigidPart{part: mp, model: model})
 					continue
 				}
 

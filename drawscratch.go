@@ -42,6 +42,8 @@ type drawScratch struct {
 
 	// The parts, the cull uniform, and the options of the mesh path.
 	meshDraws                          []meshDraw
+	rigid                              []rigidPart
+	rigidRecords                       []ebiten.Vertex
 	meshCull                           []float32
 	meshDepthOptions, meshColorOptions ebiten.DrawTrianglesShaderOptions
 

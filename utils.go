@@ -67,7 +67,15 @@ var base3DShaderText []byte
 // To turn off lighting or fog individually, you would simply turn on shadelessness and foglessness in
 // your object's Material (or shadelessness in your Model itself).
 func ExtendBase3DShader(customFragment string) (*ebiten.Shader, error) {
-	return ebiten.NewShader(base3DShaderSource(customFragment))
+	shader, err := ebiten.NewShader(base3DShaderSource(customFragment))
+	if err != nil {
+		return nil, err
+	}
+	// The variant for the mesh path, see gpuMeshPart.
+	if rigid, err := ebiten.NewShader(withGPURigid(base3DShaderSource(customFragment))); err == nil {
+		rigidShaders[shader] = rigid
+	}
+	return shader, nil
 }
 
 // base3DShaderSource returns the source of the base 3D shader, extended with

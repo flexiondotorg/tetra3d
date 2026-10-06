@@ -279,6 +279,12 @@ func (m *Material) SetShader(shader *ebiten.Shader) {
 	}
 }
 
+// shaderOn reports whether the material draws with its own fragment shader.
+// m can be nil.
+func (m *Material) shaderOn() bool {
+	return m != nil && m.fragmentShader != nil && m.FragmentShaderOn
+}
+
 // Shader returns the custom Kage fragment shader for the Material.
 func (m *Material) Shader() *ebiten.Shader {
 	return m.fragmentShader
