@@ -270,6 +270,7 @@ type Camera struct {
 
 	resultColorTexture  *ebiten.Image // ColorTexture holds the color results of rendering any models.
 	resultDepthTexture  *ebiten.Image // DepthTexture holds the depth results of rendering any models, if Camera.RenderDepth is on.
+	ownDepthTexture     *ebiten.Image // The depth texture of the camera, which SetDepthTexture can replace.
 	resultNormalTexture *ebiten.Image // NormalTexture holds a texture indicating the normal render
 	clearColor          color.NRGBA64 // The colour of ClearWithColor, passed to Fill by pointer so that it does not allocate.
 	depthIntermediate   *ebiten.Image
@@ -611,7 +612,7 @@ func (camera *Camera) Resize(w, h int) {
 		camera.resultAccumulatedColorTexture.Dispose()
 		camera.resultNormalTexture.Dispose()
 		camera.accumulatedBackBuffer.Dispose()
-		camera.resultDepthTexture.Dispose()
+		camera.ownDepthTexture.Dispose()
 		camera.depthIntermediate.Dispose()
 	}
 
@@ -622,7 +623,8 @@ func (camera *Camera) Resize(w, h int) {
 	camera.resultAccumulatedColorTexture = ebiten.NewImageWithOptions(bounds, opt)
 	camera.accumulatedBackBuffer = ebiten.NewImageWithOptions(bounds, opt)
 	camera.resultColorTexture = ebiten.NewImageWithOptions(bounds, opt)
-	camera.resultDepthTexture = ebiten.NewImageWithOptions(bounds, opt)
+	camera.ownDepthTexture = ebiten.NewImageWithOptions(bounds, opt)
+	camera.resultDepthTexture = camera.ownDepthTexture
 	camera.resultNormalTexture = ebiten.NewImageWithOptions(bounds, opt)
 	camera.depthIntermediate = ebiten.NewImageWithOptions(bounds, opt)
 	camera.sphereFactorCalculated = false
@@ -1052,7 +1054,7 @@ func (camera *Camera) ClearWithColor(clear Color4) {
 
 	camera.resultColorTexture.Fill(&camera.clearColor)
 
-	if camera.RenderDepth {
+	if camera.RenderDepth && camera.resultDepthTexture == camera.ownDepthTexture {
 		camera.resultDepthTexture.Clear()
 	}
 
@@ -2893,6 +2895,20 @@ func (camera *Camera) DepthTexture() *ebiten.Image {
 		return nil
 	}
 	return camera.resultDepthTexture
+}
+
+// SetDepthTexture makes img the depth texture of the camera, in place of its
+// own, until the next Resize, or its own again when img is nil. img must have
+// the size of the camera. Clear leaves img as it is, so the caller writes
+// every pixel of img in each frame before the camera renders: the depth in
+// the encoding of the camera in RGB, and an alpha of 0 where nothing is
+// drawn. The camera reads only whether the alpha is 0, so the alpha of a
+// drawn pixel can carry the caller's own data.
+func (camera *Camera) SetDepthTexture(img *ebiten.Image) {
+	if img == nil {
+		img = camera.ownDepthTexture
+	}
+	camera.resultDepthTexture = img
 }
 
 // NormalTexture returns the camera's final result normal texture from any previous Render() or RenderNodes() calls. If Camera.RenderNormals is set to false,
