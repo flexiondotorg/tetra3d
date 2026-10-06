@@ -475,12 +475,16 @@ func (mesh *Mesh) SetAutoSubdivide(autoSubdivide bool) {
 
 				for i := 0; i < mesh.library.maxAutoSubdivisionCount; i++ {
 					triCount := math32.Pow(4, float32(i+1))
-					tri.subdivisionLevels = append(tri.subdivisionLevels, make([]*Triangle, 0, int(triCount)))
+					if tri.subdivisions == nil {
+						tri.subdivisions = &[][]*Triangle{}
+					}
+					*tri.subdivisions = append(*tri.subdivisions, make([]*Triangle, 0, int(triCount)))
 				}
 
 				tri.performSubdivision(0, tri, smallestMaxTriSize, mesh.library.maxAutoSubdivisionCount)
 
-				triCount += len(tri.subdivisionLevels[len(tri.subdivisionLevels)-1])
+				levels := tri.subdivisionLevels()
+				triCount += len(levels[len(levels)-1])
 
 			})
 
@@ -1724,33 +1728,44 @@ func NewCylinderMesh(sideCount int, radius, height float32, createCaps bool) *Me
 
 // A Triangle represents the smallest renderable object in Tetra3D. A Triangle is mainly used to help identify triads of vertices.
 type Triangle struct {
-	id           uint32    // The ID of the triangle
+	// The fields are in an order that leaves no padding, so that a
+	// Triangle fits in 80 bytes.
 	VertexIndexA int       // Vertex indices that compose the triangle
 	VertexIndexB int       // Vertex indices that compose the triangle
 	VertexIndexC int       // Vertex indices that compose the triangle
+	id           uint32    // The ID of the triangle
 	MaxSpan      float32   // The maximum span from corner to corner of the triangle's dimensions; this is used in intersection testing.
 	Center       Vector3   // The untransformed center of the Triangle.
 	Normal       Vector3   // The physical normal of the triangle (i.e. the direction the triangle is facing). This is different from the visual normals of a triangle's vertices (i.e. a selection of vertices can have inverted normals to be see through, for example).
 	MeshPart     *MeshPart // The specific MeshPart this Triangle belongs to.
 
-	visible bool
-	// wouldRender       bool
-	subdivisionParent *Triangle
-	subdivisionLevels [][]*Triangle
+	// The triangles of each level of the auto subdivision, or nil for a
+	// triangle with none, see subdivisionLevels.
+	subdivisions *[][]*Triangle
 
-	broadphaseTriCheck []bool // A slice of bools indicating if the tri has already been checked by a broadphase TrianglesInDimensionsSet function call. See that function for more information on what this is and why it exists
+	visible bool
+	// An array of bools indicating if the tri has already been checked by a broadphase TrianglesInDimensionsSet function call. See that function for more information on what this is and why it exists. It is an array, so that it needs no allocation of its own.
+	broadphaseTriCheck [4]bool
+	// wouldRender       bool
+}
+
+// subdivisionLevels returns the triangles of each level of the auto
+// subdivision of t, or nil.
+func (t *Triangle) subdivisionLevels() [][]*Triangle {
+	if t.subdivisions == nil {
+		return nil
+	}
+	return *t.subdivisions
 }
 
 // NewTriangle creates a new Triangle, and requires a reference to its owning MeshPart.
 func NewTriangle(meshPart *MeshPart, indices ...int) *Triangle {
 	tri := &Triangle{
-		MeshPart:           meshPart,
-		VertexIndexA:       indices[0],
-		VertexIndexB:       indices[1],
-		VertexIndexC:       indices[2],
-		visible:            true,
-		subdivisionLevels:  [][]*Triangle{},
-		broadphaseTriCheck: make([]bool, 4),
+		MeshPart:     meshPart,
+		VertexIndexA: indices[0],
+		VertexIndexB: indices[1],
+		VertexIndexC: indices[2],
+		visible:      true,
 	}
 	return tri
 }
@@ -1763,8 +1778,12 @@ func (tri *Triangle) Clone() *Triangle {
 	newTri.Center = tri.Center
 	newTri.Normal = tri.Normal
 	newTri.MeshPart = tri.MeshPart
-	for level := range tri.subdivisionLevels {
-		newTri.subdivisionLevels[level] = append(make([]*Triangle, 0, len(tri.subdivisionLevels[level])), tri.subdivisionLevels[level]...)
+	if levels := tri.subdivisionLevels(); levels != nil {
+		newLevels := make([][]*Triangle, len(levels))
+		for level := range levels {
+			newLevels[level] = append(make([]*Triangle, 0, len(levels[level])), levels[level]...)
+		}
+		newTri.subdivisions = &newLevels
 	}
 	newTri.visible = tri.visible
 	return newTri
@@ -1853,7 +1872,6 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 	t.MeshPart.Mesh.vertexLights.colors = append(t.MeshPart.Mesh.vertexLights.colors, Color4{}, Color4{}, Color4{})
 
 	subTriA := NewTriangle(t.MeshPart, t1, subIndex, subIndex+2)
-	subTriA.subdivisionParent = base
 	subTriA.id = subdividedTriangleID
 	subTriA.MaxSpan = t.MaxSpan / 2
 	subTriA.Center = t.MeshPart.Mesh.VertexPositions[t1].
@@ -1861,7 +1879,6 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 		Add(t.MeshPart.Mesh.VertexPositions[subIndex+2]).Scale(1.0 / 3.0)
 
 	subTriB := NewTriangle(t.MeshPart, subIndex, t2, subIndex+1)
-	subTriB.subdivisionParent = base
 	subTriB.id = subdividedTriangleID
 	subTriB.MaxSpan = t.MaxSpan / 2
 	subTriB.Center = t.MeshPart.Mesh.VertexPositions[subIndex].
@@ -1869,7 +1886,6 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 		Add(t.MeshPart.Mesh.VertexPositions[subIndex+1]).Scale(1.0 / 3.0)
 
 	subTriC := NewTriangle(t.MeshPart, subIndex+1, t3, subIndex+2)
-	subTriC.subdivisionParent = base
 	subTriC.id = subdividedTriangleID
 	subTriC.MaxSpan = t.MaxSpan / 2
 	subTriC.Center = t.MeshPart.Mesh.VertexPositions[subIndex+1].
@@ -1877,14 +1893,13 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 		Add(t.MeshPart.Mesh.VertexPositions[subIndex+2]).Scale(1.0 / 3.0)
 
 	subTriD := NewTriangle(t.MeshPart, subIndex, subIndex+1, subIndex+2)
-	subTriD.subdivisionParent = base
 	subTriD.id = subdividedTriangleID
 	subTriD.MaxSpan = t.MaxSpan / 2
 	subTriD.Center = t.MeshPart.Mesh.VertexPositions[subIndex].
 		Add(t.MeshPart.Mesh.VertexPositions[subIndex+1]).
 		Add(t.MeshPart.Mesh.VertexPositions[subIndex+2]).Scale(1.0 / 3.0)
 
-	base.subdivisionLevels[subdivisionLevel] = append(base.subdivisionLevels[subdivisionLevel],
+	(*base.subdivisions)[subdivisionLevel] = append((*base.subdivisions)[subdivisionLevel],
 		subTriA,
 		subTriB,
 		subTriC,
@@ -1901,7 +1916,7 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 func (t *Triangle) disableSubdivision() {
 	if !t.visible {
 		t.visible = true
-		for _, level := range t.subdivisionLevels {
+		for _, level := range t.subdivisionLevels() {
 			for _, subDiv := range level {
 				subDiv.visible = false
 			}
@@ -1914,12 +1929,12 @@ func (t *Triangle) handleSubdivision(cameraPos Vector3, model *Model, autoSubdiv
 	// t.wouldRender = false
 	t.visible = false
 
-	if len(t.subdivisionLevels) == 0 {
+	if len(t.subdivisionLevels()) == 0 {
 		t.visible = true
 		return
 	}
 
-	for _, level := range t.subdivisionLevels {
+	for _, level := range t.subdivisionLevels() {
 		for _, subDividedTriangle := range level {
 			subDividedTriangle.visible = false
 		}
@@ -1957,12 +1972,12 @@ func (t *Triangle) handleSubdivision(cameraPos Vector3, model *Model, autoSubdiv
 			subIndex++
 		}
 
-		if subIndex >= len(t.subdivisionLevels) {
-			subIndex = len(t.subdivisionLevels) - 1
+		if subIndex >= len(t.subdivisionLevels()) {
+			subIndex = len(t.subdivisionLevels()) - 1
 		}
 
 		if subIndex >= 0 {
-			for _, subDiv := range t.subdivisionLevels[subIndex] {
+			for _, subDiv := range t.subdivisionLevels()[subIndex] {
 				subDiv.visible = true
 			}
 		} else {
@@ -2310,7 +2325,7 @@ func (part *MeshPart) forEachTri(includeSubdivided bool, triFunc func(tri *Trian
 
 		if includeSubdivided {
 
-			for _, subLevel := range tri.subdivisionLevels {
+			for _, subLevel := range tri.subdivisionLevels() {
 				for _, subTri := range subLevel {
 					triFunc(subTri)
 				}
