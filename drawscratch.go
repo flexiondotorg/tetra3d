@@ -52,6 +52,10 @@ type drawScratch struct {
 	meshCull                           []float32
 	meshDepthOptions, meshColorOptions ebiten.DrawTrianglesShaderOptions
 
+	// The quad and the options of Camera.clearForMeshes.
+	clearVertices [4]ebiten.Vertex
+	clearOptions  ebiten.DrawTrianglesShaderOptions
+
 	// foglessValue holds fogless. foglessNormal is the value of Fogless in a
 	// normal render, an int like the literal 1 that it stands for.
 	foglessValue, foglessNormal any

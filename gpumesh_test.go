@@ -340,3 +340,65 @@ func TestGPUBend(t *testing.T) {
 		t.Errorf("%d of %d drawn pixels differ", differ, drawn)
 	}
 }
+
+// TestClearForMeshes draws a red cube in front of a green one, and a wide
+// blue box just inside the far plane, on the mesh path, over a
+// depthIntermediate that holds stale values. It checks that the red cube
+// shows where the cubes overlap and that the blue box shows in a corner, so
+// the quad at the far plane hides nothing. In the next frame it writes stale
+// values again, clears them with clearForMeshes, and checks that every byte
+// is zero.
+func TestClearForMeshes(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes")
+	}
+	scene := NewScene("clear")
+	scene.World.LightingOn = false
+	scene.World.FogOn = false
+	cube := func(x, z float32, c Color4) *Model {
+		m := NewModel("cube", NewCubeMesh(2, 2, 2))
+		m.mesh.MeshParts[0].Material.Color = c
+		m.mesh.MeshParts[0].Material.Shadeless = true
+		m.SetLocalPosition(x, 0, z)
+		return m
+	}
+	near := cube(0, -6, NewColor4(1, 0, 0, 1))
+	far := cube(1.2, -9, NewColor4(0, 1, 0, 1))
+	cam := NewCamera("camera", 64, 64)
+	cam.GPUMesh = true
+	back := cube(0, -cam.Far()+1.5, NewColor4(0, 0, 1, 1))
+	back.SetLocalScale(80, 80, 1)
+	scene.Root.AddChildren(cam, near, far, back)
+	inFrame(t, func() {
+		near.mesh.BuildGPUMesh()
+		far.mesh.BuildGPUMesh()
+		back.mesh.BuildGPUMesh()
+	})
+	stale := make([]byte, 64*64*4)
+	for p := range stale {
+		stale[p] = byte(p*37 + 11)
+	}
+	var cleared, colour [64 * 64 * 4]byte
+	inFrame(t, func() {
+		cam.Clear()
+		cam.depthIntermediate.WritePixels(stale)
+		cam.RenderScene(scene)
+		cam.ColorTexture().ReadPixels(colour[:])
+	})
+	inFrame(t, func() {
+		cam.depthIntermediate.WritePixels(stale)
+		cam.clearForMeshes(cam.depthIntermediate)
+		cam.depthIntermediate.ReadPixels(cleared[:])
+	})
+	if cleared != [64 * 64 * 4]byte{} {
+		t.Errorf("clearForMeshes left stale values in depthIntermediate")
+	}
+	if p := 4 * (32*64 + 32); [3]byte(colour[p:p+3]) != [3]byte{255, 0, 0} {
+		t.Errorf("the overlap is %v, want red", colour[p:p+3])
+	}
+	if p := 4 * (2*64 + 2); [3]byte(colour[p:p+3]) != [3]byte{0, 0, 255} {
+		t.Errorf("the far box is %v in a corner, want blue", colour[p:p+3])
+	}
+}
