@@ -1303,8 +1303,7 @@ func depthPassRect(verts []ebiten.Vertex, w, h int) (rect image.Rectangle, parti
 		minY = min(minY, y)
 		maxY = max(maxY, y)
 	}
-	rect = image.Rect(clampPixel(minX-1, w), clampPixel(minY-1, h), clampPixel(maxX+2, w), clampPixel(maxY+2, h))
-	return rect, rect != image.Rect(0, 0, w, h)
+	return screenBounds{minX: minX, minY: minY, maxX: maxX, maxY: maxY}.rect(w, h)
 }
 
 func clampPixel(v float32, limit int) int {
@@ -1471,6 +1470,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		}
 	}
 
+	// listBounds holds the bounds of the screen positions in the colour vertex
+	// list when every part in the list took the plain loop, and listBoundsOn
+	// is true in that case.
+	var listBounds screenBounds
+	listBoundsOn := false
+
 	render := func(rp renderPair) {
 
 		// startingVertexListIndex := vertexListIndex
@@ -1631,6 +1636,26 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		hasVertexColors := mesh.VertexActiveColorChannel >= 0
 		if hasVertexColors {
 			vertexColors = mesh.VertexColors[mesh.VertexActiveColorChannel].colors
+		}
+
+		if startingVertexListIndex == 0 {
+			listBounds = emptyScreenBounds()
+			listBoundsOn = true
+		}
+
+		plainLoop := screenFromVertexPass && !lighting && !camera.RenderNormals && !camera.PerspectiveCorrectedTextureMapping &&
+			camera.RenderDepth && !customDepthFunctionSet &&
+			(rp.MeshPart.Material == nil || rp.MeshPart.Material.BillboardedDepthMode != DepthModeUnbillboarded)
+
+		if plainLoop {
+			var bounds screenBounds
+			vertexListIndex, bounds = writeVertexList(colorVertexList, vertexListIndex, scanStart, scanEnd, stampNow, globalVertexStamp, globalVertexSlot,
+				globalVertexTransforms, globalVertexScreen, vertexUVs, vertexColors, mpColor,
+				camWidth, camHeight, srcW, srcH, depthMarginPercentage, camSpread)
+			listBounds.add(bounds)
+			scanEnd = scanStart // The general loop below has nothing left to write.
+		} else {
+			listBoundsOn = false
 		}
 
 		for vertexIndex := scanStart; vertexIndex < scanEnd; vertexIndex++ {
@@ -1912,7 +1937,13 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			// The depth and colour draws of this part touch only the pixels inside the
 			// bounds of its vertices, so the clear and the copy can stay inside them too.
-			rect, partial := depthPassRect(colorVertexList[:vertexListIndex], camWidth, camHeight)
+			var rect image.Rectangle
+			var partial bool
+			if listBoundsOn {
+				rect, partial = listBounds.rect(camWidth, camHeight)
+			} else {
+				rect, partial = depthPassRect(colorVertexList[:vertexListIndex], camWidth, camHeight)
+			}
 
 			if !partial {
 				camera.depthIntermediate.Clear()
