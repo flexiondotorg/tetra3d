@@ -268,6 +268,12 @@ type Mesh struct {
 	Triangles []*Triangle // The various triangles composing the Mesh.
 	triIndex  int
 
+	// Packed copies of the triangle data that the renderer reads, in the
+	// order of Triangles: three vertex indices and the centre for each
+	// triangle. See UpdateTriangleData.
+	triVertexIndices []int32
+	triCenters       []Vector3
+
 	// Vertices are stored as a struct-of-arrays for simplified and faster rendering.
 	// Each vertex property (position, normal, UV, colors, weights, bones, etc) is stored
 	// here and indexed in order of vertex index.
@@ -1967,6 +1973,20 @@ func (t *Triangle) IsDegenerate() bool {
 	return v1.Equals(v2) || v2.Equals(v3) || v3.Equals(v1)
 }
 
+// UpdateTriangleData copies the vertex indices and the center of each triangle into the packed arrays that the renderer reads.
+// The renderer calls it when the number of triangles changes, and Triangle.RecalculateCenter updates the packed center.
+// Call it after you change VertexIndexA, VertexIndexB, VertexIndexC, or Center of a Triangle in place.
+func (mesh *Mesh) UpdateTriangleData() {
+	mesh.triVertexIndices = slices.Grow(mesh.triVertexIndices[:0], 3*len(mesh.Triangles))[:3*len(mesh.Triangles)]
+	mesh.triCenters = slices.Grow(mesh.triCenters[:0], len(mesh.Triangles))[:len(mesh.Triangles)]
+	for i, tri := range mesh.Triangles {
+		mesh.triVertexIndices[3*i] = int32(tri.VertexIndexA)
+		mesh.triVertexIndices[3*i+1] = int32(tri.VertexIndexB)
+		mesh.triVertexIndices[3*i+2] = int32(tri.VertexIndexC)
+		mesh.triCenters[i] = tri.Center
+	}
+}
+
 // RecalculateCenter recalculates the center for the Triangle. Note that this should only be called if you manually change a vertex's
 // individual position.
 func (tri *Triangle) RecalculateCenter() {
@@ -1980,6 +2000,13 @@ func (tri *Triangle) RecalculateCenter() {
 	tri.Center.X = (verts[tri.VertexIndexA].X + verts[tri.VertexIndexB].X + verts[tri.VertexIndexC].X) / 3
 	tri.Center.Y = (verts[tri.VertexIndexA].Y + verts[tri.VertexIndexB].Y + verts[tri.VertexIndexC].Y) / 3
 	tri.Center.Z = (verts[tri.VertexIndexA].Z + verts[tri.VertexIndexB].Z + verts[tri.VertexIndexC].Z) / 3
+
+	// Keep the packed center of a triangle of the mesh in step. The ID of a
+	// triangle from MeshPart.AddTriangles is its place in Triangles plus 1.
+	mesh := tri.MeshPart.Mesh
+	if i := int(tri.id) - 1; i >= 0 && i < len(mesh.triCenters) && i < len(mesh.Triangles) && mesh.Triangles[i] == tri {
+		mesh.triCenters[i] = tri.Center
+	}
 
 	// Determine the maximum span of the triangle; this is done for bounds checking, since we can reject triangles early if we
 	// can easily tell we're too far away from them.
