@@ -17,7 +17,7 @@ func uniformBits(t *testing.T, m map[string]any) map[string][]uint32 {
 	t.Helper()
 	out := map[string][]uint32{}
 	for name, value := range m {
-		if strings.HasPrefix(name, "GPUVertex") || strings.HasPrefix(name, "GPUMesh") {
+		if strings.HasPrefix(name, "GPUVertex") || strings.HasPrefix(name, "GPUMesh") || strings.HasPrefix(name, "GPUBend") {
 			continue
 		}
 		v := reflect.ValueOf(value)

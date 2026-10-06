@@ -314,6 +314,7 @@ type Camera struct {
 	depthShaderMesh, colorShaderMesh   *ebiten.Shader
 	depthShaderRigid, colorShaderRigid *ebiten.Shader
 	depthShaderPose, colorShaderPose   *ebiten.Shader
+	depthShaderBend, colorShaderBend   *ebiten.Shader
 	meshDraws, meshInstances           int
 
 	// Visibility check variables
@@ -537,6 +538,12 @@ func NewCamera(name string, w, h int) *Camera {
 		panic(err)
 	}
 	if cam.colorShaderRigid, err = ebiten.NewShader(withGPURigid(base3DShaderSource(""))); err != nil {
+		panic(err)
+	}
+	if cam.depthShaderBend, err = ebiten.NewShader(withGPUBend(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.colorShaderBend, err = ebiten.NewShader(withGPUBend(base3DShaderSource(""))); err != nil {
 		panic(err)
 	}
 	if cam.depthShaderPose, err = ebiten.NewShader(withGPUPose(depthShaderText)); err != nil {
