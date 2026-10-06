@@ -376,12 +376,12 @@ func NewCamera(name string, w, h int) *Camera {
 			return dstPos.xy - imageDstOrigin() + imageSrc0Origin()
 		}
 
-		func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+		func Fragment(dstPos vec4, srcPos vec2, color, custom vec4) vec4 {
 
 			existingDepth := imageSrc0UnsafeAt(dstPosToSrcPos(dstPos.xy))
 
-			if existingDepth.a == 0 || decodeDepth(existingDepth) > color.r {
-				return encodeDepth(color.r)
+			if existingDepth.a == 0 || decodeDepth(existingDepth) > custom.y {
+				return encodeDepth(custom.y)
 			}
 
 			discard()
@@ -454,7 +454,6 @@ func NewCamera(name string, w, h int) *Camera {
 
 		func Fragment(dstPos vec4, srcPos vec2, vc, custom vec4) vec4 {
 
-			color := vc
 			srcSize := imageSrc1Size()
 
 			// There's atlassing going on behind the scenes here, so:
@@ -491,8 +490,8 @@ func NewCamera(name string, w, h int) *Camera {
 
 			depthValue := imageSrc0UnsafeAt(dstPosToSrcPos(dstPos.xy))
 
-			if depthValue.a == 0 || decodeDepth(depthValue) > color.r {
-				return vec4(encodeDepth(color.r).rgb, tex.a)
+			if depthValue.a == 0 || decodeDepth(depthValue) > custom.y {
+				return vec4(encodeDepth(custom.y).rgb, tex.a)
 			}
 
 			discard()
@@ -1670,8 +1669,6 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 				colorVertexList[vertexListIndex].DstX = dx
 				colorVertexList[vertexListIndex].DstY = dy
-				depthVertexList[vertexListIndex].DstX = dx
-				depthVertexList[vertexListIndex].DstY = dy
 
 				var uvU, uvV float32
 
@@ -1692,12 +1689,8 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 				if camera.PerspectiveCorrectedTextureMapping {
 					d := 1.0 / float32(w)
 					colorVertexList[vertexListIndex].Custom0 = d // Set the perspective divide here
-					depthVertexList[vertexListIndex].Custom0 = d
 					// normalVertexList[vertexListIndex].Custom0 = d
 				}
-
-				depthVertexList[vertexListIndex].SrcX = uvU
-				depthVertexList[vertexListIndex].SrcY = uvV
 
 				if camera.RenderNormals {
 
@@ -1768,10 +1761,8 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 						depth = 1
 					}
 
-					depthVertexList[vertexListIndex].ColorR = float32(depth)
-					depthVertexList[vertexListIndex].ColorG = float32(depth)
-					depthVertexList[vertexListIndex].ColorB = float32(depth)
-					depthVertexList[vertexListIndex].ColorA = 1
+					// The depth pass draws the colour vertices and reads the depth from Custom1.
+					colorVertexList[vertexListIndex].Custom1 = float32(depth)
 
 				} else if scene.World != nil && scene.World.FogOn {
 
@@ -1877,7 +1868,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			// OK, so the general process for rendering to the depth texture is three-fold:
 			// 1) For solid objects, we simply render all triangles using camera.DepthShader. This draws triangles using their vertices'
-			// color channels to indicate depth. It reads camera.DepthTexture to discard fragments previously rendered with a darker color
+			// Custom1 value to indicate depth. It reads camera.DepthTexture to discard fragments previously rendered with a darker color
 			// (and so are closer, as the color ranges from 0 (black, close) to 1 (white, far)).
 
 			// 2) For transparent objects, we do the above, but don't write the transparent object to the DepthTexture.
@@ -1901,7 +1892,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			// The depth and colour draws of this part touch only the pixels inside the
 			// bounds of its vertices, so the clear and the copy can stay inside them too.
-			rect, partial := depthPassRect(depthVertexList[:vertexListIndex], camWidth, camHeight)
+			rect, partial := depthPassRect(colorVertexList[:vertexListIndex], camWidth, camHeight)
 
 			if !partial {
 				camera.depthIntermediate.Clear()
@@ -1914,13 +1905,13 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 				shaderOpt := &draw.clipOptions
 				shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture, img}
-				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:indexListIndex], camera.clipAlphaShader, shaderOpt)
+				camera.depthIntermediate.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.clipAlphaShader, shaderOpt)
 
 			} else {
 				shaderOpt := &draw.depthOptions
 				shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture}
 
-				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShader, shaderOpt)
+				camera.depthIntermediate.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShader, shaderOpt)
 			}
 
 			if !model.isTransparent(meshPart) {
