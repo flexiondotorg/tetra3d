@@ -72,10 +72,10 @@ func referenceSort(kept []refTri, binCount int) []refTri {
 func bucketTris() (added, sorted []refTri) {
 	b := globalSortingTriangleBucket
 	for _, st := range b.unsetTris[:b.unsetTriIndex] {
-		added = append(added, refTri{st.Triangle, st.depth})
+		added = append(added, refTri{b.tris[st.index], st.depth})
 	}
 	for _, st := range b.sorted {
-		sorted = append(sorted, refTri{st.Triangle, st.depth})
+		sorted = append(sorted, refTri{b.tris[st.index], st.depth})
 	}
 	return added, sorted
 }
@@ -148,4 +148,36 @@ func TestTriangleDataFollowsChanges(t *testing.T) {
 	tri.VertexIndexA, tri.VertexIndexB = tri.VertexIndexB, tri.VertexIndexA
 	mesh.UpdateTriangleData()
 	check("changed indices")
+}
+
+// TestIndexListMatchesPointerReads checks that the vertex marks and the index
+// writes, which read the packed vertex indices, mark the same vertices and
+// give the same index list as reads through each drawn triangle's pointer.
+func TestIndexListMatchesPointerReads(t *testing.T) {
+	for _, texture := range []bool{false, true} {
+		scene, camera, mesh := listScene(true, texture)
+		_, indices := renderLists(scene, camera)
+
+		// The lists and the bucket hold the last mesh part drawn.
+		b := globalSortingTriangleBucket
+		if len(b.sorted) < 500 {
+			t.Fatalf("texture %v: %d triangles drawn, want at least 500", texture, len(b.sorted))
+		}
+		want := make([]bool, len(mesh.VertexPositions))
+		for k, st := range b.sorted {
+			tri := mesh.Triangles[st.index]
+			for j := range 3 {
+				v := tri.VertexIndex(j)
+				want[v] = true
+				if got := indices[3*k+j]; got != uint16(globalVertexSlot[v]) {
+					t.Fatalf("texture %v: index %d: %d, want %d", texture, 3*k+j, got, globalVertexSlot[v])
+				}
+			}
+		}
+		for v := range want {
+			if marked := globalVertexStamp[v] == globalVertexStampNow; marked != want[v] {
+				t.Fatalf("texture %v: vertex %d marked %v, want %v", texture, v, marked, want[v])
+			}
+		}
+	}
 }
