@@ -356,9 +356,7 @@ func (mesh *Mesh) Clone() *Mesh {
 		newMesh.VertexNormals = append(newMesh.VertexNormals, mesh.VertexNormals[i])
 	}
 
-	for i := range mesh.vertexLights.colors {
-		newMesh.vertexLights.colors = append(newMesh.vertexLights.colors, mesh.vertexLights.colors[i])
-	}
+	newMesh.vertexLights.colors = append(newMesh.vertexLights.colors[:0], mesh.vertexLights.colors...)
 
 	for i := range mesh.VertexUVs {
 		newMesh.VertexUVs = append(newMesh.VertexUVs, mesh.VertexUVs[i])
@@ -519,10 +517,9 @@ func (mesh *Mesh) allocateVertexBuffers(addedVertexCount int) {
 				colors: make([]Color4, 0, addedVertexCount),
 			}
 		}
-		mesh.VertexBones = make([][]uint16, 0, addedVertexCount)
-		mesh.VertexWeights = make([][]float32, 0, addedVertexCount)
-
-		mesh.vertexLights.colors = make([]Color4, addedVertexCount)
+		// The bones and the weights grow only for a mesh that has them,
+		// see AddVertices.
+		mesh.vertexLights.colors = make([]Color4, 0, addedVertexCount)
 	} else {
 		mesh.VertexPositions = slices.Grow(mesh.VertexPositions, addedVertexCount)
 		mesh.VertexPositionsOriginal = slices.Grow(mesh.VertexPositionsOriginal, addedVertexCount)
@@ -533,30 +530,39 @@ func (mesh *Mesh) allocateVertexBuffers(addedVertexCount int) {
 		for ci := range mesh.VertexColors {
 			mesh.VertexColors[ci].colors = slices.Grow(mesh.VertexColors[ci].colors, addedVertexCount)
 		}
-		mesh.VertexBones = slices.Grow(mesh.VertexBones, addedVertexCount)
-		mesh.VertexWeights = slices.Grow(mesh.VertexWeights, addedVertexCount)
-		mesh.vertexLights.colors = slices.Grow(mesh.vertexLights.colors, addedVertexCount)
-
-		for range addedVertexCount - len(mesh.vertexLights.colors) {
-			mesh.vertexLights.colors = append(mesh.vertexLights.colors, Color4{})
+		if len(mesh.VertexBones) > 0 {
+			mesh.VertexBones = slices.Grow(mesh.VertexBones, addedVertexCount)
+			mesh.VertexWeights = slices.Grow(mesh.VertexWeights, addedVertexCount)
 		}
+		mesh.vertexLights.colors = slices.Grow(mesh.vertexLights.colors, addedVertexCount)
 
 	}
 
 }
 
+// ensureEnoughVertexColorChannels makes channels up to channelIndex, and at
+// least one, and fills each channel with white up to the vertex count.
 func (mesh *Mesh) ensureEnoughVertexColorChannels(channelIndex int) {
+	mesh.growVertexColors(channelIndex, len(mesh.VertexPositions))
+}
 
-	mesh.VertexColors = slices.Grow(mesh.VertexColors, channelIndex+1)
+// growVertexColors makes channels up to channelIndex, and at least one, and
+// fills each channel with white up to n colours, with no spare capacity.
+func (mesh *Mesh) growVertexColors(channelIndex, n int) {
 
-	for len(mesh.VertexColors) <= channelIndex+1 {
+	for len(mesh.VertexColors) < max(channelIndex+1, 1) {
 		mesh.VertexColors = append(mesh.VertexColors, &VertexColorChannel{})
 	}
 
-	for ci := range mesh.VertexColors {
-		mesh.VertexColors[ci].colors = slices.Grow(mesh.VertexColors[ci].colors, len(mesh.VertexPositions))
-		for len(mesh.VertexColors[ci].colors) < len(mesh.VertexPositions) {
-			mesh.VertexColors[ci].colors = append(mesh.VertexColors[ci].colors, Color4{1, 1, 1, 1})
+	for _, ch := range mesh.VertexColors {
+		if len(ch.colors) >= n {
+			continue
+		}
+		if cap(ch.colors) < n {
+			ch.colors = append(make([]Color4, 0, n), ch.colors...)
+		}
+		for len(ch.colors) < n {
+			ch.colors = append(ch.colors, Color4{1, 1, 1, 1})
 		}
 	}
 
@@ -690,6 +696,25 @@ func (mesh *Mesh) AddVertices(verts ...VertexInfo) {
 
 	addStart := len(mesh.VertexPositions)
 
+	// The colour channels grow once, to their exact size, in white, and
+	// the bones and the weights only for a mesh with a vertex that has
+	// them: otherwise they stay empty, see GetVertexInfo.
+	channels := 0
+	bones := len(mesh.VertexBones) > 0
+	for i := range verts {
+		channels = max(channels, len(verts[i].Colors))
+		bones = bones || len(verts[i].Bones) > 0 || len(verts[i].Weights) > 0
+	}
+	mesh.growVertexColors(channels-1, addStart+len(verts))
+	if bones && len(mesh.VertexBones) < addStart {
+		mesh.VertexBones = append(make([][]uint16, 0, addStart+len(verts)), mesh.VertexBones...)
+		mesh.VertexWeights = append(make([][]float32, 0, addStart+len(verts)), mesh.VertexWeights...)
+		for len(mesh.VertexBones) < addStart {
+			mesh.VertexBones = append(mesh.VertexBones, nil)
+			mesh.VertexWeights = append(mesh.VertexWeights, nil)
+		}
+	}
+
 	for i := 0; i < len(verts); i++ {
 
 		vertInfo := verts[i]
@@ -700,14 +725,14 @@ func (mesh *Mesh) AddVertices(verts ...VertexInfo) {
 		mesh.VertexUVs = append(mesh.VertexUVs, Vector2{vertInfo.U, vertInfo.V})
 		mesh.VertexUVsOriginal = append(mesh.VertexUVsOriginal, Vector2{vertInfo.U, vertInfo.V})
 
-		mesh.ensureEnoughVertexColorChannels(len(vertInfo.Colors) - 1)
-
 		for channelIndex := 0; channelIndex < len(vertInfo.Colors); channelIndex++ {
 			mesh.VertexColors[channelIndex].colors[addStart+i] = vertInfo.Colors[channelIndex]
 		}
 
-		mesh.VertexBones = append(mesh.VertexBones, vertInfo.Bones)
-		mesh.VertexWeights = append(mesh.VertexWeights, vertInfo.Weights)
+		if bones {
+			mesh.VertexBones = append(mesh.VertexBones, vertInfo.Bones)
+			mesh.VertexWeights = append(mesh.VertexWeights, vertInfo.Weights)
+		}
 
 		mesh.vertexLights.colors = append(mesh.vertexLights.colors, Color4{})
 
@@ -1822,6 +1847,10 @@ func (t *Triangle) performSubdivision(subdivisionLevel int, base *Triangle, inte
 
 	}
 
+	// The light of each new vertex, which AddVertices keeps at the vertex
+	// count.
+	t.MeshPart.Mesh.vertexLights.colors = append(t.MeshPart.Mesh.vertexLights.colors, Color4{}, Color4{}, Color4{})
+
 	subTriA := NewTriangle(t.MeshPart, t1, subIndex, subIndex+2)
 	subTriA.subdivisionParent = base
 	subTriA.id = subdividedTriangleID
@@ -2493,8 +2522,12 @@ func (mesh *Mesh) GetVertexInfo(vertexIndex int) VertexInfo {
 		NormalX: mesh.VertexNormals[vertexIndex].X,
 		NormalY: mesh.VertexNormals[vertexIndex].Y,
 		NormalZ: mesh.VertexNormals[vertexIndex].Z,
-		Bones:   mesh.VertexBones[vertexIndex],
-		Weights: mesh.VertexWeights[vertexIndex],
+	}
+
+	// A mesh with no bones keeps no bones or weights, see AddVertices.
+	if vertexIndex < len(mesh.VertexBones) {
+		v.Bones = mesh.VertexBones[vertexIndex]
+		v.Weights = mesh.VertexWeights[vertexIndex]
 	}
 
 	colors := []Color4{}
