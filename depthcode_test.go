@@ -11,9 +11,6 @@ import (
 // as a GPU without fused operations computes them. The GPU stores each channel
 // as round(x * 255).
 
-// depthUnits is the number of steps of the three-byte encoding, 255 cubed.
-const depthUnits = 255 * 65025
-
 func fract32(x float32) float32 { return x - float32(math.Floor(float64(x))) }
 func floor32(x float32) float32 { return float32(math.Floor(float64(x))) }
 

@@ -655,6 +655,9 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 	}
 	camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
 
+	// The colour pass tests the depth with its own hardware depth buffer, so
+	// it takes no depth gate from the last draw of the sorted path.
+	draw.depthGate[0] = 0
 	opt = &draw.meshColorOptions
 	for i := range list {
 		d := &list[i]
