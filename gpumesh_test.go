@@ -1,0 +1,133 @@
+package tetra3d
+
+import (
+	"image/color"
+	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2"
+)
+
+// TestGPUMeshNearestColour draws a red cube in front of a green one with the
+// sorted path, with both on the mesh path, and with one on each path, and
+// checks that the pixel where they overlap is red, and a pixel of the green
+// cube alone is green, each time.
+func TestGPUMeshNearestColour(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes")
+	}
+	scene := NewScene("cubes")
+	scene.World.LightingOn = false
+	scene.World.FogOn = false
+	cube := func(x, z float32, c Color4) *Model {
+		m := NewModel("cube", NewCubeMesh(2, 2, 2))
+		m.mesh.MeshParts[0].Material.Color = c
+		m.mesh.MeshParts[0].Material.Shadeless = true
+		m.SetLocalPosition(x, 0, z)
+		return m
+	}
+	near := cube(0, -6, NewColor4(1, 0, 0, 1))
+	far := cube(1.2, -9, NewColor4(0, 1, 0, 1))
+	cam := NewCamera("camera", 64, 64)
+	scene.Root.AddChildren(cam, near, far)
+	inFrame(t, func() {
+		near.mesh.BuildGPUMesh()
+		far.mesh.BuildGPUMesh()
+	})
+	nearMesh, farMesh := near.mesh.MeshParts[0].gpuMesh, far.mesh.MeshParts[0].gpuMesh
+
+	for _, c := range []struct {
+		name      string
+		on        bool
+		near, far *ebiten.Mesh
+		draws     int
+	}{
+		{"sorted", false, nearMesh, farMesh, 0},
+		{"mesh", true, nearMesh, farMesh, 4},
+		{"near on the mesh path", true, nearMesh, nil, 2},
+		{"far on the mesh path", true, nil, farMesh, 2},
+	} {
+		var overlap, farOnly color.Color
+		var draws int
+		inFrame(t, func() {
+			cam.GPUMesh = c.on
+			near.mesh.MeshParts[0].gpuMesh, far.mesh.MeshParts[0].gpuMesh = c.near, c.far
+			cam.Clear()
+			cam.RenderScene(scene)
+			overlap, farOnly = cam.ColorTexture().At(38, 32), cam.ColorTexture().At(45, 32)
+			draws, _ = cam.MeshStats()
+		})
+		if r, g, b, a := overlap.RGBA(); r != 0xffff || g != 0 || b != 0 || a != 0xffff {
+			t.Errorf("%s: overlap %v, want red", c.name, overlap)
+		}
+		if r, g, b, a := farOnly.RGBA(); r != 0 || g != 0xffff || b != 0 || a != 0xffff {
+			t.Errorf("%s: far cube %v, want green", c.name, farOnly)
+		}
+		if draws != c.draws {
+			t.Errorf("%s: %d mesh draws, want %d", c.name, draws, c.draws)
+		}
+	}
+}
+
+// TestRigidRecords draws two models that share a cube mesh with a colour on
+// each face, one turned and scaled unevenly and one mirrored, with the sorted
+// path and with the mesh path, and checks that the mesh path draws them as
+// one part with two records, and that the images match but for edge pixels.
+func TestRigidRecords(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes")
+	}
+	scene := NewScene("cubes")
+	scene.World.LightingOn = false
+	scene.World.FogOn = false
+	cube := NewCubeMesh(2, 2, 2)
+	cube.ensureEnoughVertexColorChannels(0)
+	cube.VertexActiveColorChannel = 0
+	faces := [6]Color4{{1, 0, 0, 1}, {0, 1, 0, 1}, {0, 0, 1, 1}, {1, 1, 0, 1}, {0, 1, 1, 1}, {1, 0, 1, 1}}
+	for i := range cube.VertexPositions {
+		cube.VertexColors[0].colors[i] = faces[i/4]
+	}
+	a, b := NewModel("a", cube), NewModel("b", cube)
+	a.SetLocalPosition(-1.4, 0, -7)
+	a.SetLocalRotation(NewMatrix4Rotate(1, 1, 0, 0.7))
+	a.SetLocalScale(1, 0.6, 1.4)
+	b.SetLocalPosition(1.5, 0.3, -8)
+	b.SetLocalRotation(NewMatrix4Rotate(0, 1, 0, 0.4))
+	b.SetLocalScale(-1, 1, 1)
+	cam := NewCamera("camera", 64, 64)
+	scene.Root.AddChildren(cam, a, b)
+	inFrame(t, func() { cube.BuildGPUMesh() })
+
+	var images [2][64 * 64 * 4]byte
+	var draws, records int
+	for i, on := range []bool{false, true} {
+		inFrame(t, func() {
+			cam.GPUMesh = on
+			cam.Clear()
+			cam.RenderScene(scene)
+			cam.ColorTexture().ReadPixels(images[i][:])
+			draws, records = cam.MeshStats()
+		})
+	}
+	if draws != 2 || records != 2 {
+		t.Errorf("%d mesh draws and %d records, want 2 and 2", draws, records)
+	}
+	drawn, differ := 0, 0
+	for p := 0; p < len(images[0]); p += 4 {
+		if [4]byte(images[0][p:p+4]) != [4]byte(images[0][:4]) {
+			drawn++
+		}
+		for c := range 4 {
+			if d := int(images[0][p+c]) - int(images[1][p+c]); d > 8 || d < -8 {
+				differ++
+				break
+			}
+		}
+	}
+	if drawn < 200 || differ > drawn/20 {
+		t.Errorf("%d of %d drawn pixels differ", differ, drawn)
+	}
+}
