@@ -8,8 +8,9 @@ import (
 
 // TestSetDepthTexture gives the camera a depth texture of its own that holds
 // a depth near the camera, with an alpha that is neither 0 nor 1, and checks
-// that Clear leaves it, that it hides a red cube, and that the cube shows
-// again with the camera's own depth texture.
+// that Clear leaves it, that it hides a red cube on the sorted path and on
+// the mesh path, and that the cube shows again with the camera's own depth
+// texture. It skips the mesh case when the graphics driver cannot draw meshes.
 func TestSetDepthTexture(t *testing.T) {
 	scene := NewScene("depth")
 	scene.World.LightingOn = false
@@ -24,18 +25,26 @@ func TestSetDepthTexture(t *testing.T) {
 		near[p+2], near[p+3] = 1, 3
 	}
 	var depth *ebiten.Image
+	var supported bool
 	inFrame(t, func() {
+		if supported = ebiten.IsMeshDrawingSupported(); supported {
+			cube.mesh.BuildGPUMesh()
+		}
 		depth = ebiten.NewImage(64, 64)
 		depth.WritePixels(near)
 	})
 	for _, c := range []struct {
-		name string
-		own  bool
-		red  bool
-	}{{"caller", false, false}, {"own", true, true}} {
+		name     string
+		gpu, own bool
+		red      bool
+	}{{"sorted", false, false, false}, {"mesh", true, false, false}, {"own", false, true, true}} {
+		if c.gpu && !supported {
+			continue
+		}
 		var pix [4]byte
 		kept := make([]byte, len(near))
 		inFrame(t, func() {
+			cam.GPUMesh = c.gpu
 			if c.own {
 				cam.SetDepthTexture(nil)
 			} else {

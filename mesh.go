@@ -2276,6 +2276,7 @@ type MeshPart struct {
 	// that it is for, see Mesh.BuildGPUMesh.
 	gpuMesh      *ebiten.Mesh
 	gpuMeshVerts int
+	meshGroup    int // One more than the index of its draw in drawScratch.groupRigid, or 0.
 }
 
 // NewMeshPart creates a new MeshPart that renders using the specified Material.
