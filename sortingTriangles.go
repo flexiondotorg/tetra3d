@@ -7,8 +7,8 @@ import (
 // sortingTriangle is used specifically for sorting triangles when rendering. Less data means more data fits in cache,
 // which means sorting is faster.
 type sortingTriangle struct {
-	Triangle *Triangle
-	depth    float32
+	index int32 // The place of the triangle in the bucket's tris, and a third of its place in vertexIndices.
+	depth float32
 }
 
 // sortingTriangleBucket sorts the triangles of a mesh part into depth bins
@@ -23,6 +23,14 @@ type sortingTriangleBucket struct {
 	binStarts     []int             // The count, then the next place, of each bin.
 	sortedTris    []sortingTriangle // The buffer for sorted.
 
+	// tris and vertexIndices give the triangle and its three vertex indices
+	// for the index of each sorting triangle: the mesh's Triangles and packed
+	// indices, or the auto-subdivided triangles of the part.
+	tris             []*Triangle
+	vertexIndices    []int32
+	subTris          []*Triangle
+	subVertexIndices []int32
+
 	// sorted holds the triangles in draw order after Sort.
 	sorted []sortingTriangle
 }
@@ -33,14 +41,31 @@ func newSortingTriangleBucket() *sortingTriangleBucket {
 	return bucket
 }
 
-func (s *sortingTriangleBucket) AddTriangle(tri *Triangle, depth float32) {
+// setMesh makes the indices of AddTriangle refer to the triangles of mesh.
+func (s *sortingTriangleBucket) setMesh(mesh *Mesh) {
+	s.tris = mesh.Triangles
+	s.vertexIndices = mesh.triVertexIndices
+}
+
+// AddTriangle adds the triangle at index in the triangles of setMesh.
+func (s *sortingTriangleBucket) AddTriangle(index int, depth float32) {
 	if s.unsetTriIndex >= len(s.unsetTris) {
 		s.unsetTris = append(s.unsetTris, sortingTriangle{})
 		s.unsetTris = s.unsetTris[:cap(s.unsetTris)]
 	}
-	s.unsetTris[s.unsetTriIndex].Triangle = tri
+	s.unsetTris[s.unsetTriIndex].index = int32(index)
 	s.unsetTris[s.unsetTriIndex].depth = depth
 	s.unsetTriIndex++
+}
+
+// addSubdividedTriangle adds an auto-subdivided triangle, which is not in the
+// mesh's Triangles.
+func (s *sortingTriangleBucket) addSubdividedTriangle(tri *Triangle, depth float32) {
+	s.subTris = append(s.subTris, tri)
+	s.subVertexIndices = append(s.subVertexIndices, int32(tri.VertexIndexA), int32(tri.VertexIndexB), int32(tri.VertexIndexC))
+	s.tris = s.subTris
+	s.vertexIndices = s.subVertexIndices
+	s.AddTriangle(len(s.subTris)-1, depth)
 }
 
 func (s *sortingTriangleBucket) Sort(minRange, maxRange float32) {
@@ -118,12 +143,14 @@ func (s *sortingTriangleBucket) resizeTriangleCount(triCount int) {
 func (s *sortingTriangleBucket) Clear() {
 	s.unsetTriIndex = 0
 	s.sorted = s.sorted[:0]
+	s.subTris = s.subTris[:0]
+	s.subVertexIndices = s.subVertexIndices[:0]
 }
 
 // ForEach calls forEach for each triangle in draw order, after Sort.
 func (s *sortingTriangleBucket) ForEach(forEach func(triIndex int, triangle *Triangle)) {
 	for triIndex, tri := range s.sorted {
-		forEach(triIndex, tri.Triangle)
+		forEach(triIndex, s.tris[tri.index])
 	}
 }
 
