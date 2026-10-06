@@ -509,11 +509,32 @@ func sameRGB(a, b *Model) bool {
 // depth buffers of the GPU clear only at the first draw of a frame. It does
 // not allocate once its buffers have grown.
 func (camera *Camera) RenderMeshes(scene *Scene, batches []MeshBatch) {
+	draw := camera.appendBatches(batches)
+	list := draw.meshDraws[draw.queued:]
+	camera.drawMeshes(scene, list)
+	clear(list)
+	draw.meshDraws = draw.meshDraws[:draw.queued]
+}
+
+// QueueMeshes queues the batches for the next Render, which draws them as
+// RenderMeshes does, first, in one run with its own parts on the mesh path:
+// one clear of depthIntermediate, the depth of every part, one copy into the
+// depth texture, and the colour of every part. The batches and their records
+// must stay unchanged until Render. Call it after Clear and before Render, and
+// once in each frame. It does not allocate once its buffers have grown.
+func (camera *Camera) QueueMeshes(batches []MeshBatch) {
+	draw := camera.appendBatches(batches)
+	draw.queued = len(draw.meshDraws)
+}
+
+// appendBatches appends one draw for each part of each batch that has a GPU
+// mesh to the queued draws, and returns the scratch of the camera.
+func (camera *Camera) appendBatches(batches []MeshBatch) *drawScratch {
 	if camera.draw == nil {
 		camera.draw = newDrawScratch()
 	}
 	draw := camera.draw
-	draw.meshDraws = draw.meshDraws[:0]
+	draw.meshDraws = draw.meshDraws[:draw.queued]
 	for _, b := range batches {
 		for _, part := range b.Mesh.MeshParts {
 			if part.gpuMeshReady() && len(b.Records) > 0 {
@@ -521,8 +542,7 @@ func (camera *Camera) RenderMeshes(scene *Scene, batches []MeshBatch) {
 			}
 		}
 	}
-	camera.drawMeshes(scene, draw.meshDraws)
-	clear(draw.meshDraws)
+	return draw
 }
 
 // MeshStats returns the draws with a GPU mesh, and the instance records that

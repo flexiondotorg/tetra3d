@@ -1112,6 +1112,12 @@ func (camera *Camera) ClearWithColor(clear Color4) {
 func (camera *Camera) ResetFrame() {
 
 	camera.meshDraws, camera.meshInstances = 0, 0
+	if d := camera.draw; d != nil {
+		for i := range d.queued {
+			d.meshDraws[i] = meshDraw{}
+		}
+		d.queued = 0
+	}
 
 	if camera.DebugInfo != nil && camera.DebugInfo.On {
 
@@ -1456,7 +1462,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	// Reusing vectors rather than reallocating for all triangles for all models
 	draw.solids = draw.solids[:0]
 	draw.transparents = draw.transparents[:0]
-	draw.meshDraws = draw.meshDraws[:0]
+	draw.meshDraws = draw.meshDraws[:draw.queued]
 
 	cameraPos := camera.WorldPosition()
 
@@ -2130,6 +2136,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	draw.groupRigid(camera)
 	camera.drawMeshes(scene, draw.meshDraws)
 	clear(draw.meshDraws)
+	draw.queued = 0
 
 	slices.SortStableFunc(transparents, compareTransparents)
 

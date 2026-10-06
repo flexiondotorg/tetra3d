@@ -71,6 +71,60 @@ func TestGPUMeshNearestColour(t *testing.T) {
 	}
 }
 
+// TestQueueMeshes draws a green cube from a MeshBatch and a red model on the
+// mesh path, each in front of the other in turn, with RenderMeshes and with
+// QueueMeshes, and checks that the images are the same and that the nearer
+// cube covers the overlap.
+func TestQueueMeshes(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes")
+	}
+	scene := NewScene("queue")
+	scene.World.LightingOn = false
+	scene.World.FogOn = false
+	green := NewCubeMesh(2, 2, 2)
+	green.MeshParts[0].Material.Color = NewColor4(0, 1, 0, 1)
+	red := NewModel("red", NewCubeMesh(2, 2, 2))
+	red.mesh.MeshParts[0].Material.Color = NewColor4(1, 0, 0, 1)
+	cam := NewCamera("camera", 64, 64)
+	cam.GPUMesh = true
+	scene.Root.AddChildren(cam, red)
+	inFrame(t, func() {
+		green.BuildGPUMesh()
+		red.mesh.BuildGPUMesh()
+	})
+	for _, c := range []struct {
+		redZ, greenZ float32
+		want         [3]byte
+	}{{-6, -9, [3]byte{255, 0, 0}}, {-9, -6, [3]byte{0, 255, 0}}} {
+		red.SetLocalPosition(0, 0, c.redZ)
+		rec := ebiten.Vertex{DstX: 1.2, DstY: c.greenZ, SrcX: 1, ColorR: 1, ColorG: 1, ColorB: 1, Custom0: 1}
+		batches := []MeshBatch{{Mesh: green, Records: []ebiten.Vertex{rec}}}
+		var images [2][64 * 64 * 4]byte
+		for i, queue := range []bool{false, true} {
+			inFrame(t, func() {
+				cam.Clear()
+				if queue {
+					cam.QueueMeshes(batches)
+				} else {
+					cam.RenderMeshes(scene, batches)
+				}
+				cam.RenderScene(scene)
+				cam.ColorTexture().ReadPixels(images[i][:])
+			})
+		}
+		if images[0] != images[1] {
+			t.Errorf("red at z %v: the images of RenderMeshes and QueueMeshes differ", c.redZ)
+		}
+		p := 4 * (32*64 + 38)
+		if got := [3]byte(images[1][p : p+3]); got != c.want {
+			t.Errorf("red at z %v: overlap %v, want %v", c.redZ, got, c.want)
+		}
+	}
+}
+
 // TestRigidRecords draws two models that share a cube mesh with a colour on
 // each face, one turned and scaled unevenly and one mirrored, with the sorted
 // path and with the mesh path, and checks that the mesh path draws them as
