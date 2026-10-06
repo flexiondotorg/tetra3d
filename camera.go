@@ -303,6 +303,11 @@ type Camera struct {
 	colorShader     *ebiten.Shader
 	sprite3DShader  *ebiten.Shader
 
+	// The depth and colour shaders of the mesh path, see gpuMeshSource, and
+	// its draws and instance records since the last Clear.
+	depthShaderMesh, colorShaderMesh *ebiten.Shader
+	meshDraws, meshInstances         int
+
 	// Visibility check variables
 	cameraForward          Vector3
 	cameraRight            Vector3
@@ -511,6 +516,13 @@ func NewCamera(name string, w, h int) *Camera {
 	cam.colorShader, err = ExtendBase3DShader("")
 
 	if err != nil {
+		panic(err)
+	}
+
+	if cam.depthShaderMesh, err = ebiten.NewShader(withGPUMesh(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(base3DShaderSource(""))); err != nil {
 		panic(err)
 	}
 
@@ -1071,6 +1083,8 @@ func (camera *Camera) ClearWithColor(clear Color4) {
 // before the camera renders, and writes every pixel of its own depth texture,
 // see SetDepthTexture.
 func (camera *Camera) ResetFrame() {
+
+	camera.meshDraws, camera.meshInstances = 0, 0
 
 	if camera.DebugInfo != nil && camera.DebugInfo.On {
 
