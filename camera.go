@@ -312,6 +312,7 @@ type Camera struct {
 	// The depth and colour shaders of the mesh path, see gpuMeshSource, and
 	// its draws and instance records since the last Clear.
 	depthShaderMesh, colorShaderMesh   *ebiten.Shader
+	clearShaderDepth                   *ebiten.Shader // Clears an image at the far plane with the depth test, see Camera.clearForMeshes.
 	depthShaderRigid, colorShaderRigid *ebiten.Shader
 	depthShaderPose, colorShaderPose   *ebiten.Shader
 	depthShaderBend, colorShaderBend   *ebiten.Shader
@@ -529,6 +530,9 @@ func NewCamera(name string, w, h int) *Camera {
 	}
 
 	if cam.depthShaderMesh, err = ebiten.NewShader(withGPUMesh(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.clearShaderDepth, err = ebiten.NewShader(clearDepthShaderSource); err != nil {
 		panic(err)
 	}
 	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(base3DShaderSource(""))); err != nil {

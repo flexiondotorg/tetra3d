@@ -551,6 +551,44 @@ func (camera *Camera) MeshStats() (draws, instances int) {
 	return camera.meshDraws, camera.meshInstances
 }
 
+// clearDepthShaderSource clears every pixel of an image with a full-screen
+// quad at the far plane. With the depth test, the quad is the first depth
+// draw of the image in the frame, so the depth buffer clears at its start,
+// the test keeps every fragment, and the quad writes the clear value back.
+var clearDepthShaderSource = []byte(`//kage:unit pixels
+
+package main
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4) (vec4, vec2, vec4, vec4) {
+	p := imageDstProjection() * vec4(dstPos+imageDstOrigin(), 0, 1)
+	return vec4(p.xy, p.w, p.w), srcPos, color, custom
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return vec4(0)
+}
+`)
+
+// clearForMeshes clears img to transparent black, as Clear does, with a draw
+// that also starts the depth test of the frame. A tile-based GPU then draws
+// the clear and the mesh draws after it in one render pass, in place of a
+// pass for the clear and a pass that clears the depth buffer. img must be an
+// unmanaged image, not a sub-image, and its first depth draw of the frame
+// must come after this call. It does not allocate.
+func (camera *Camera) clearForMeshes(img *ebiten.Image) {
+	draw := camera.draw
+	w, h := float32(img.Bounds().Dx()), float32(img.Bounds().Dy())
+	v := &draw.clearVertices
+	v[1].DstX, v[2].DstY = w, h
+	v[3].DstX, v[3].DstY = w, h
+	draw.clearOptions.Blend = ebiten.BlendCopy
+	draw.clearOptions.Depth = true
+	img.DrawTrianglesShader32(v[:], clearIndices[:], camera.clearShaderDepth, &draw.clearOptions)
+}
+
+// clearIndices are the two triangles of the quad of clearForMeshes.
+var clearIndices = [6]uint32{0, 1, 2, 1, 3, 2}
+
 // drawMeshes draws the list on the mesh path. The depth pass draws each part
 // into depthIntermediate with a hardware depth test, and discards a fragment
 // that is behind the depth texture, as the depth pass of the sorted path
@@ -598,7 +636,7 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		draw.meshCull[0], draw.meshCull[1], draw.meshCull[2], draw.meshCull[3] = camPos.X, camPos.Y, camPos.Z, facing
 	}
 
-	camera.depthIntermediate.Clear()
+	camera.clearForMeshes(camera.depthIntermediate)
 	opt := &draw.meshDepthOptions
 	opt.Images[0] = camera.resultDepthTexture
 	for i := range list {
