@@ -1,6 +1,8 @@
 package tetra3d
 
 import (
+	"slices"
+
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
@@ -72,15 +74,83 @@ func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot v
 }
 `
 
+// gpuRigidSource is the Kage vertex function of the mesh path for models,
+// which Camera.Render draws with one record for each model that shows a mesh
+// part, see rigidRecord. A record places the mesh with the world transform of
+// its model: a model-space point p goes to p.x*r0 + p.y*r1 + p.z*r2 + t, with
+//
+//	ColorR, ColorG, ColorB  r0
+//	Custom0, Custom1, Custom2  r1
+//	SrcY                 f, so that r2 is f times the cross product of r0 and r1
+//	DstX, DstY, SrcX     t
+//	ColorA               the alpha of the model colour
+//	Custom3              a depth bias, which moves the mesh towards the camera
+//	                     along the view ray, in world units
+//
+// That holds every transform of a scale on the axes of the model, a rotation,
+// and a translation, and a mirror as a negative f. The uniforms are those of
+// gpuMeshSource, with the colour of the model and the material in
+// GPUVertexTint.
+const gpuRigidSource = `
+
+var GPUVertexMatrix mat4
+var GPUVertexDepth vec4
+var GPUVertexTint vec4
+var GPUVertexTexSize vec2
+var GPUMeshCull vec4
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot vec2, iTint vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
+	r0 := iTint.xyz
+	r1 := iCustom.xyz
+	r2 := iRot.y * cross(r0, r1)
+	world := vec4(dstPos.x*r0+dstPos.y*r1+custom.x*r2+vec3(iPos, iRot.x), 1)
+	// The cofactors turn the normal, and turn it over for a mirror.
+	n := custom.y*cross(r1, r2) + custom.z*cross(r2, r0) + custom.w*cross(r0, r1)
+	back := GPUMeshCull.w*dot(n, GPUMeshCull.xyz-world.xyz) < 0
+	view := GPUMeshCull.xyz - world.xyz
+	world.xyz += iCustom.w * view / max(length(view), 0.001)
+	p := GPUVertexMatrix * world
+	pos := imageDstProjection() * vec4(p.xy+imageDstOrigin()*p.w, p.z, p.w)
+	if back {
+		pos = vec4(0, 0, 2, 1)
+	}
+	return pos, srcPos*GPUVertexTexSize + imageSrc0Origin(), color * GPUVertexTint * vec4(1, 1, 1, iTint.a), vec4(0, dot(GPUVertexDepth, world), 0, 0)
+}
+`
+
 // withGPUMesh returns the shader source src with the vertex function of the
 // mesh path.
 func withGPUMesh(src []byte) []byte {
 	return append(append([]byte(nil), src...), gpuMeshSource...)
 }
 
-// identityRecord is the instance record that draws a mesh where its model
-// places it: the model matrix is in the uniforms.
-var identityRecord = []ebiten.Vertex{{SrcX: 1, Custom0: 1, ColorR: 1, ColorG: 1, ColorB: 1}}
+// withGPURigid returns the shader source src with the vertex function of the
+// mesh path for models.
+func withGPURigid(src []byte) []byte {
+	return append(append([]byte(nil), src...), gpuRigidSource...)
+}
+
+// rigidShaders holds the variant for the mesh path of each shader that
+// ExtendBase3DShader makes, so that a material with such a shader can draw
+// on the mesh path.
+var rigidShaders = map[*ebiten.Shader]*ebiten.Shader{}
+
+// rigidRecord returns the instance record of gpuRigidSource for model, with
+// a depth bias.
+func rigidRecord(model *Model, bias float32) ebiten.Vertex {
+	t := model.Transform()
+	r0, r1, r2 := t.RowAsVector3(0), t.RowAsVector3(1), t.RowAsVector3(2)
+	c := r0.Cross(r1)
+	f := float32(0)
+	if d := c.Dot(c); d > 0 {
+		f = r2.Dot(c) / d
+	}
+	return ebiten.Vertex{
+		DstX: t[3][0], DstY: t[3][1], SrcX: t[3][2], SrcY: f,
+		ColorR: r0.X, ColorG: r0.Y, ColorB: r0.Z, ColorA: model.Color.A,
+		Custom0: r1.X, Custom1: r1.Y, Custom2: r1.Z, Custom3: bias,
+	}
+}
 
 // BuildGPUMesh uploads each part of the mesh to the GPU, in the vertex layout
 // of gpuVertices, for the mesh path of a camera with GPUMesh on, and of
@@ -140,10 +210,40 @@ func (mesh *Mesh) gpuVertices() []ebiten.Vertex {
 	return dst
 }
 
+// gpuPlaceable reports whether a vertex shader can place part of model for
+// the camera: nothing moves the vertices or needs them on the processor.
+func (camera *Camera) gpuPlaceable(model *Model, part *MeshPart, lighting bool) bool {
+	if !camera.perspective || !camera.RenderDepth || camera.RenderNormals ||
+		camera.PerspectiveCorrectedTextureMapping || camera.VertexSnapping > 0 || lighting {
+		return false
+	}
+	mesh := part.Mesh
+	if model.DynamicBatchOwner != nil || model.skinned || model.VertexTransformFunction != nil || model.VertexClipFunction != nil ||
+		mesh.autoSubdivide || len(mesh.shapeKeys) > 0 {
+		return false
+	}
+	mat := part.Material
+	return mat == nil || (!mat.BillboardEnabled && mat.BillboardedDepthMode != DepthModeUnbillboarded && mat.TextureMapMode == 0)
+}
+
 // gpuMeshReady reports whether the part has a GPU mesh that matches the
 // vertices of its mesh.
 func (part *MeshPart) gpuMeshReady() bool {
 	return part.gpuMesh != nil && part.gpuMeshVerts == len(part.Mesh.VertexPositions)
+}
+
+// gpuMeshPart reports whether Camera.Render draws part of model on the mesh
+// path: the camera has GPUMesh on, the part has a current GPU mesh, a vertex
+// shader can place it, it is opaque with no alpha clip, and its fragment
+// shader, if any, has a variant in rigidShaders. Alpha-clip and transparent
+// parts need the sorted path. On the mesh path, a custom depth function
+// it becomes a depth bias, see groupRigid.
+func (camera *Camera) gpuMeshPart(model *Model, part *MeshPart, lighting bool) bool {
+	if !camera.GPUMesh || !part.gpuMeshReady() || !camera.gpuPlaceable(model, part, lighting) || model.isTransparent(part) {
+		return false
+	}
+	mat := part.Material
+	return mat == nil || mat.TransparencyMode != TransparencyModeAlphaClip && (!mat.shaderOn() || rigidShaders[mat.fragmentShader] != nil)
 }
 
 // MeshBatch is a mesh that Camera.RenderMeshes draws once for each instance
@@ -153,11 +253,78 @@ type MeshBatch struct {
 	Records []ebiten.Vertex
 }
 
-// meshDraw is one part that the mesh path draws, with the records of its
-// MeshBatch.
+// meshDraw is one part that the mesh path draws: with the records of a
+// MeshBatch when model is nil, or with the records of gpuRigidSource for the
+// models that show it in the colour of model.
 type meshDraw struct {
 	part    *MeshPart
+	model   *Model
 	records []ebiten.Vertex
+	n       int // The number of records, while groupRigid counts them.
+}
+
+// rigidPart is a part of a model that Camera.Render draws on the mesh path.
+type rigidPart struct {
+	part  *MeshPart
+	model *Model
+	group int // The index of its meshDraw.
+}
+
+// groupRigid appends to s.meshDraws one draw for each mesh part in s.rigid,
+// and for each colour of the models that show it, with a record for each of
+// those models. A custom depth function of a material becomes the depth bias
+// of the record: the offset that it gives at the model's distance from the
+// camera. It clears s.rigid. It does not allocate once its buffers have
+// grown.
+func (s *drawScratch) groupRigid(camera *Camera) {
+	camPos := camera.WorldPosition()
+	for i := range s.rigid {
+		r := &s.rigid[i]
+		g := r.part.meshGroup - 1
+		if g >= 0 && !sameRGB(s.meshDraws[g].model, r.model) {
+			g = -1
+			for j := range s.meshDraws {
+				if d := &s.meshDraws[j]; d.part == r.part && sameRGB(d.model, r.model) {
+					g = j
+					break
+				}
+			}
+		}
+		if g < 0 {
+			g = len(s.meshDraws)
+			s.meshDraws = append(s.meshDraws, meshDraw{part: r.part, model: r.model})
+			r.part.meshGroup = g + 1
+		}
+		r.group = g
+		s.meshDraws[g].n++
+	}
+	s.rigidRecords = slices.Grow(s.rigidRecords[:0], len(s.rigid))[:len(s.rigid)]
+	off := 0
+	for i := range s.meshDraws {
+		d := &s.meshDraws[i]
+		if d.model != nil {
+			d.records = s.rigidRecords[off : off : off+d.n]
+			off += d.n
+			d.part.meshGroup = 0
+		}
+	}
+	for _, r := range s.rigid {
+		d := &s.meshDraws[r.group]
+		var bias float32
+		if f := r.part.Material; f != nil && f.CustomDepthFunction != nil {
+			z := camPos.DistanceTo(r.model.WorldPosition())
+			bias = z - f.CustomDepthFunction(r.model, camera, r.part, 0, z)
+		}
+		d.records = append(d.records, rigidRecord(r.model, bias))
+	}
+	clear(s.rigid)
+	s.rigid = s.rigid[:0]
+}
+
+// sameRGB reports whether the models a and b have the same colour, but for
+// the alpha, which each record carries.
+func sameRGB(a, b *Model) bool {
+	return a.Color.R == b.Color.R && a.Color.G == b.Color.G && a.Color.B == b.Color.B
 }
 
 // RenderMeshes draws the solid, unlit meshes of the batches with a hardware
@@ -217,6 +384,9 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 
 	uniforms := func(d *meshDraw) {
 		tint, facing := NewColor4(1, 1, 1, 1), float32(1)
+		if d.model != nil {
+			tint = NewColor4(d.model.Color.R, d.model.Color.G, d.model.Color.B, 1)
+		}
 		var srcW, srcH float32
 		if mat := d.part.Material; mat != nil {
 			tint = tint.MultiplyRGBA(mat.Color.ToFloat32s())
@@ -238,7 +408,11 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		d := &list[i]
 		uniforms(d)
 		opt.Mesh = d.part.gpuMesh
-		camera.depthIntermediate.DrawTrianglesShader32(d.records, nil, camera.depthShaderMesh, opt)
+		shader := camera.depthShaderMesh
+		if d.model != nil {
+			shader = camera.depthShaderRigid
+		}
+		camera.depthIntermediate.DrawTrianglesShader32(d.records, nil, shader, opt)
 	}
 	camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
 
@@ -264,7 +438,24 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		opt.Uniforms = draw.colorUniforms(world, fogless, false)
 		opt.Images[0], opt.Images[1] = img, camera.depthIntermediate
 		opt.Mesh = d.part.gpuMesh
-		camera.resultColorTexture.DrawTrianglesShader32(d.records, nil, camera.colorShaderMesh, opt)
+		shader := camera.colorShaderMesh
+		if d.model != nil {
+			shader = camera.colorShaderRigid
+			if mat.shaderOn() {
+				// A fragment shader of a material, with its uniforms and
+				// images, as on the sorted path.
+				shader = rigidShaders[mat.fragmentShader]
+				if o := mat.FragmentShaderOptions; o != nil {
+					opt.Uniforms = draw.withFragmentUniforms(opt.Uniforms, o.Uniforms)
+					for i, img := range o.Images {
+						if img != nil {
+							opt.Images[i] = img
+						}
+					}
+				}
+			}
+		}
+		camera.resultColorTexture.DrawTrianglesShader32(d.records, nil, shader, opt)
 
 		camera.meshDraws += 2
 		camera.meshInstances += len(d.records)
