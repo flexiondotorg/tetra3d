@@ -201,3 +201,88 @@ func TestGPUPose(t *testing.T) {
 		}
 	}
 }
+
+// TestGPUBend draws a bar that bends about two joints with a stretch, with
+// the sorted path, where the processor writes the bent vertices, and with
+// the mesh path and a Bend, and checks that the images match but for edge
+// pixels.
+func TestGPUBend(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes")
+	}
+	scene := NewScene("bend")
+	scene.World.LightingOn = false
+	scene.World.FogOn = false
+	bar := NewCubeMesh(4, 1, 1)
+	bar.MeshParts[0].Material.Color = NewColor4(1, 0.5, 0, 1)
+	// The left end moves by half of first, and the right end by second and
+	// then first.
+	value := func(p Vector3) float32 {
+		if p.X > 0 {
+			return 3
+		}
+		return 0.5
+	}
+	b := Bend{
+		First:   NewMatrix4Translate(1, 0, 0).Mult(NewMatrix4Rotate(0, 0, 1, 0.5)).Mult(NewMatrix4Translate(-1, 0, 0)),
+		Second:  NewMatrix4Rotate(1, 0, 0, 0.8).Mult(NewMatrix4Translate(0, 0.4, 0)),
+		Stretch: 1.17,
+		Along:   Vector3{X: 1},
+	}
+	bent := bar.Clone()
+	for i, p := range bent.VertexPositions {
+		v := value(p)
+		if v >= 2 {
+			q := b.Second.MultVec(p)
+			p = b.First.MultVec(p.Add(q.Sub(p).Scale(v - 2)))
+		} else {
+			p = p.Add(b.First.MultVec(p).Sub(p).Scale(v))
+		}
+		bent.VertexPositions[i] = p.Add(b.Along.Scale((b.Stretch - 1) * p.Dot(b.Along)))
+	}
+	gpu, cpu := NewModel("gpu", bar), NewModel("cpu", bent)
+	for _, m := range []*Model{gpu, cpu} {
+		m.SetLocalPosition(0, -0.5, -9)
+		m.SetLocalRotation(NewMatrix4Rotate(0, 1, 0, 0.6))
+	}
+	gpu.GPUBend = &b
+	cam := NewCamera("camera", 64, 64)
+	scene.Root.AddChildren(cam, gpu, cpu)
+	inFrame(t, func() {
+		bar.BuildGPUMeshFunc(func(_, v int, gv *ebiten.Vertex) { gv.ColorA = value(bar.VertexPositions[v]) })
+	})
+
+	var images [2][64 * 64 * 4]byte
+	var draws int
+	for i, on := range []bool{false, true} {
+		inFrame(t, func() {
+			cam.GPUMesh = on
+			gpu.SetVisible(on, false)
+			cpu.SetVisible(!on, false)
+			cam.Clear()
+			cam.RenderScene(scene)
+			cam.ColorTexture().ReadPixels(images[i][:])
+			draws, _ = cam.MeshStats()
+		})
+	}
+	if draws != 2 {
+		t.Errorf("%d mesh draws, want 2", draws)
+	}
+	drawn, differ := 0, 0
+	for p := 0; p < len(images[0]); p += 4 {
+		if [4]byte(images[0][p:p+4]) != [4]byte(images[0][:4]) {
+			drawn++
+		}
+		for c := range 4 {
+			if d := int(images[0][p+c]) - int(images[1][p+c]); d > 8 || d < -8 {
+				differ++
+				break
+			}
+		}
+	}
+	if drawn < 200 || differ > drawn/20 {
+		t.Errorf("%d of %d drawn pixels differ", differ, drawn)
+	}
+}
