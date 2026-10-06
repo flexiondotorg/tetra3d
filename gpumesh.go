@@ -1,6 +1,7 @@
 package tetra3d
 
 import (
+	"math"
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -33,7 +34,27 @@ import (
 // for a model transform that mirrors, or 0 for no culling. A vertex of a back
 // face goes past the far plane, and so do the other two, so the GPU draws
 // nothing of the triangle.
-const gpuMeshSource = `
+const gpuMeshSource = gpuMeshHeader + `
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot vec2, iTint vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
+	s := iCustom.x
+	a := abs(s)
+	local := vec3(dstPos.x*s, dstPos.y*a, custom.x*a)
+	world := vec4(local.x*iRot.x+local.z*iRot.y+iPos.x, local.y+iCustom.y, -local.x*iRot.y+local.z*iRot.x+iPos.y, 1)
+	p := GPUVertexMatrix * world
+	pos := imageDstProjection() * vec4(p.xy+imageDstOrigin()*p.w, p.z, p.w)
+	n := vec3(custom.y*sign(s), custom.z, custom.w)
+	n = vec3(n.x*iRot.x+n.z*iRot.y, n.y, -n.x*iRot.y+n.z*iRot.x)
+	if GPUMeshCull.w*dot(n, GPUMeshCull.xyz-world.xyz) < 0 {
+		pos = vec4(0, 0, 2, 1)
+	}
+	c := vec4(min(hueTurn(color, iTint.a)*iTint.rgb, 1), 1) * GPUVertexTint
+	return pos, srcPos*GPUVertexTexSize + imageSrc0Origin(), c, vec4(0, dot(GPUVertexDepth, world), 0, 0)
+}
+`
+
+// gpuMeshHeader holds the uniforms and the hue turn of gpuMeshSource and
+// gpuPoseSource.
+const gpuMeshHeader = `
 
 var GPUVertexMatrix mat4
 var GPUVertexDepth vec4
@@ -56,23 +77,70 @@ func hueTurn(c vec4, turn float) vec3 {
 	h = fract(h/6 + turn)
 	return v - d + d*clamp(abs(mod(h*6+vec3(0, 4, 2), 6)-3)-1, 0, 1)
 }
+`
+
+// gpuPoseSource is the vertex function of gpuMeshSource for a mesh that
+// moves between a rest pose and a peak pose, see MeshBatch.Pose. A vertex has
+// its rest position in DstX, DstY, and Custom0, the offset to its peak
+// position in SrcX, SrcY, and Custom1, and the normal of its triangle at rest
+// and at the peak in Custom2 and Custom3, each packed with PackGPUNormal. The
+// record is that of gpuMeshSource, with the pose factor k in Custom2: the
+// vertex moves to its rest position plus k times its offset, and the back-face
+// test reads the mix of the two normals by k. The mesh has no texture.
+const gpuPoseSource = gpuMeshHeader + `
+func unpackNormal(v float) vec3 {
+	hi := floor(v / 4096)
+	e := vec2(v-hi*4096, hi)/4095*2 - 1
+	n := vec3(e, 1-abs(e.x)-abs(e.y))
+	if n.z < 0 {
+		n.xy = (1 - abs(n.yx)) * (step(0, n.xy)*2 - 1)
+	}
+	return n
+}
 
 func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot vec2, iTint vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
 	s := iCustom.x
 	a := abs(s)
-	local := vec3(dstPos.x*s, dstPos.y*a, custom.x*a)
+	k := iCustom.z
+	q := vec3(dstPos, custom.x) + k*vec3(srcPos, custom.y)
+	local := vec3(q.x*s, q.y*a, q.z*a)
 	world := vec4(local.x*iRot.x+local.z*iRot.y+iPos.x, local.y+iCustom.y, -local.x*iRot.y+local.z*iRot.x+iPos.y, 1)
 	p := GPUVertexMatrix * world
 	pos := imageDstProjection() * vec4(p.xy+imageDstOrigin()*p.w, p.z, p.w)
-	n := vec3(custom.y*sign(s), custom.z, custom.w)
+	n := mix(unpackNormal(custom.z), unpackNormal(custom.w), k)
+	n.x *= sign(s)
 	n = vec3(n.x*iRot.x+n.z*iRot.y, n.y, -n.x*iRot.y+n.z*iRot.x)
 	if GPUMeshCull.w*dot(n, GPUMeshCull.xyz-world.xyz) < 0 {
 		pos = vec4(0, 0, 2, 1)
 	}
 	c := vec4(min(hueTurn(color, iTint.a)*iTint.rgb, 1), 1) * GPUVertexTint
-	return pos, srcPos*GPUVertexTexSize + imageSrc0Origin(), c, vec4(0, dot(GPUVertexDepth, world), 0, 0)
+	return pos, imageSrc0Origin(), c, vec4(0, dot(GPUVertexDepth, world), 0, 0)
 }
 `
+
+// PackGPUNormal packs the unit vector n into one float for gpuPoseSource: the
+// octahedral map of n, with 12 bits for each of its two values. The result is
+// an integer below 2^24, so a float32 holds it exactly.
+func PackGPUNormal(n Vector3) float32 {
+	s := float32(math.Abs(float64(n.X)) + math.Abs(float64(n.Y)) + math.Abs(float64(n.Z)))
+	if s == 0 {
+		return 0
+	}
+	x, y := n.X/s, n.Y/s
+	if n.Z < 0 {
+		x, y = (1-float32(math.Abs(float64(y))))*signNotZero(x), (1-float32(math.Abs(float64(x))))*signNotZero(y)
+	}
+	q := func(v float32) float32 { return float32(math.Round(float64((v*0.5 + 0.5) * 4095))) }
+	return q(x) + 4096*q(y)
+}
+
+// signNotZero returns 1 for v >= 0, and -1 otherwise.
+func signNotZero(v float32) float32 {
+	if v < 0 {
+		return -1
+	}
+	return 1
+}
 
 // gpuRigidSource is the Kage vertex function of the mesh path for models,
 // which Camera.Render draws with one record for each model that shows a mesh
@@ -124,6 +192,12 @@ func withGPUMesh(src []byte) []byte {
 	return append(append([]byte(nil), src...), gpuMeshSource...)
 }
 
+// withGPUPose returns the shader source src with the vertex function of the
+// mesh path for a mesh that moves between two poses.
+func withGPUPose(src []byte) []byte {
+	return append(append([]byte(nil), src...), gpuPoseSource...)
+}
+
 // withGPURigid returns the shader source src with the vertex function of the
 // mesh path for models.
 func withGPURigid(src []byte) []byte {
@@ -158,6 +232,15 @@ func rigidRecord(model *Model, bias float32) ebiten.Vertex {
 // vertices or the triangles of the mesh: until then, the mesh stays with the
 // other paths. It panics when ebiten.IsMeshDrawingSupported is false.
 func (mesh *Mesh) BuildGPUMesh() {
+	mesh.BuildGPUMeshFunc(nil)
+}
+
+// BuildGPUMeshFunc is BuildGPUMesh, and it calls fill, when not nil, for each
+// corner of each triangle, with the index of the triangle and of its vertex in
+// the mesh, and the GPU vertex, which fill can change. The GPU vertex holds
+// the normal of the triangle in Custom1, Custom2, and Custom3. For example,
+// fill writes the pose data of gpuPoseSource.
+func (mesh *Mesh) BuildGPUMeshFunc(fill func(tri, vertex int, v *ebiten.Vertex)) {
 	if len(mesh.triVertexIndices) != 3*len(mesh.Triangles) {
 		mesh.UpdateTriangleData()
 	}
@@ -177,6 +260,9 @@ func (mesh *Mesh) BuildGPUMesh() {
 			for _, v := range tv {
 				gv := all[v]
 				gv.Custom1, gv.Custom2, gv.Custom3 = n.X, n.Y, n.Z
+				if fill != nil {
+					fill(t, int(v), &gv)
+				}
 				idx = append(idx, uint32(len(verts)))
 				verts = append(verts, gv)
 			}
@@ -247,10 +333,12 @@ func (camera *Camera) gpuMeshPart(model *Model, part *MeshPart, lighting bool) b
 }
 
 // MeshBatch is a mesh that Camera.RenderMeshes draws once for each instance
-// record, see gpuMeshSource. Records is in world space.
+// record, see gpuMeshSource. Records is in world space. With Pose, the mesh
+// moves between two poses, see gpuPoseSource and Mesh.BuildGPUMeshFunc.
 type MeshBatch struct {
 	Mesh    *Mesh
 	Records []ebiten.Vertex
+	Pose    bool
 }
 
 // meshDraw is one part that the mesh path draws: with the records of a
@@ -260,7 +348,8 @@ type meshDraw struct {
 	part    *MeshPart
 	model   *Model
 	records []ebiten.Vertex
-	n       int // The number of records, while groupRigid counts them.
+	n       int  // The number of records, while groupRigid counts them.
+	pose    bool // The records are those of gpuPoseSource.
 }
 
 // rigidPart is a part of a model that Camera.Render draws on the mesh path.
@@ -343,7 +432,7 @@ func (camera *Camera) RenderMeshes(scene *Scene, batches []MeshBatch) {
 	for _, b := range batches {
 		for _, part := range b.Mesh.MeshParts {
 			if part.gpuMeshReady() && len(b.Records) > 0 {
-				draw.meshDraws = append(draw.meshDraws, meshDraw{part: part, records: b.Records})
+				draw.meshDraws = append(draw.meshDraws, meshDraw{part: part, records: b.Records, pose: b.Pose})
 			}
 		}
 	}
@@ -411,6 +500,8 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		shader := camera.depthShaderMesh
 		if d.model != nil {
 			shader = camera.depthShaderRigid
+		} else if d.pose {
+			shader = camera.depthShaderPose
 		}
 		camera.depthIntermediate.DrawTrianglesShader32(d.records, nil, shader, opt)
 	}
@@ -439,6 +530,9 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		opt.Images[0], opt.Images[1] = img, camera.depthIntermediate
 		opt.Mesh = d.part.gpuMesh
 		shader := camera.colorShaderMesh
+		if d.pose {
+			shader = camera.colorShaderPose
+		}
 		if d.model != nil {
 			shader = camera.colorShaderRigid
 			if mat.shaderOn() {
