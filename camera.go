@@ -1062,6 +1062,16 @@ func (camera *Camera) ClearWithColor(clear Color4) {
 		camera.resultNormalTexture.Clear()
 	}
 
+	camera.ResetFrame()
+}
+
+// ResetFrame starts a frame as ClearWithColor does, but leaves the colour,
+// depth, normal, and accumulation textures as they are. Call it in place of
+// Clear when the caller draws the background of the frame into ColorTexture
+// before the camera renders, and writes every pixel of its own depth texture,
+// see SetDepthTexture.
+func (camera *Camera) ResetFrame() {
+
 	if camera.DebugInfo != nil && camera.DebugInfo.On {
 
 		if time.Since(camera.DebugInfo.tickTime).Milliseconds() >= 100 {
