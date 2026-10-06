@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sync/atomic"
 
+	"github.com/hajimehoshi/ebiten/v2"
+
 	"github.com/solarlune/tetra3d/math32"
 )
 
@@ -2269,6 +2271,11 @@ type MeshPart struct {
 	vertexMin, vertexMax                  int
 	rangeTriStart, rangeTriEnd, rangeTris int
 	rangeSet                              bool
+
+	// The mesh of the part on the GPU, and the vertex count of the mesh
+	// that it is for, see Mesh.BuildGPUMesh.
+	gpuMesh      *ebiten.Mesh
+	gpuMeshVerts int
 }
 
 // NewMeshPart creates a new MeshPart that renders using the specified Material.
