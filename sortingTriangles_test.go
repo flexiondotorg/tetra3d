@@ -57,12 +57,14 @@ func TestSortingTriangleBucketOrder(t *testing.T) {
 
 				tris := make([]*Triangle, triCount)
 				depths := make([]float32, triCount)
+				// The bucket indexes tris, as setMesh does for a mesh.
+				bucket.tris = tris
 
 				for i := range tris {
 					tris[i] = &Triangle{id: uint32(i)}
 					// Few distinct depths give many ties; some fall outside the range.
 					depths[i] = float32(random.Intn(40)) - 5
-					bucket.AddTriangle(tris[i], depths[i])
+					bucket.AddTriangle(i, depths[i])
 				}
 
 				bucket.Sort(0, 30)

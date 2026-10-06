@@ -131,7 +131,7 @@ func TestWriteVertexListBounds(t *testing.T) {
 	n := len(mesh.VertexPositions)
 	nextVertexStamp()
 	for _, st := range globalSortingTriangleBucket.sorted {
-		tri := st.Triangle
+		tri := globalSortingTriangleBucket.tris[st.index]
 		globalVertexStamp[tri.VertexIndexA] = globalVertexStampNow
 		globalVertexStamp[tri.VertexIndexB] = globalVertexStampNow
 		globalVertexStamp[tri.VertexIndexC] = globalVertexStampNow
@@ -196,7 +196,7 @@ func BenchmarkWriteVertexList(b *testing.B) {
 	n := len(mesh.VertexPositions)
 	nextVertexStamp()
 	for _, st := range globalSortingTriangleBucket.sorted {
-		tri := st.Triangle
+		tri := globalSortingTriangleBucket.tris[st.index]
 		globalVertexStamp[tri.VertexIndexA] = globalVertexStampNow
 		globalVertexStamp[tri.VertexIndexB] = globalVertexStampNow
 		globalVertexStamp[tri.VertexIndexC] = globalVertexStampNow

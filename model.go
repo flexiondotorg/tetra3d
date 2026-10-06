@@ -974,7 +974,7 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 			maxDepth = depth
 		}
 
-		globalSortingTriangleBucket.AddTriangle(tri, depth)
+		globalSortingTriangleBucket.addSubdividedTriangle(tri, depth)
 
 		// I could substitute depth for W, but sorting by distance to the triangle center directly gives a better result overall, it seems.
 		// if sortMode != TriangleSortModeNone {
@@ -1107,6 +1107,7 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 		if len(mesh.triCenters) != len(mesh.Triangles) {
 			mesh.UpdateTriangleData()
 		}
+		globalSortingTriangleBucket.setMesh(mesh)
 		// A part with no triangles has TriangleStart above TriangleEnd.
 		triStart, triEnd := meshPart.TriangleStart, meshPart.TriangleEnd+1
 		var triVertexIndices []int32
@@ -1192,7 +1193,7 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 				maxDepth = depth
 			}
 
-			globalSortingTriangleBucket.AddTriangle(mesh.Triangles[triStart+i], depth)
+			globalSortingTriangleBucket.AddTriangle(triStart+i, depth)
 
 			vertexListIndex += 3
 
