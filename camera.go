@@ -1572,7 +1572,13 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		vertexClipFunctionOn := model != nil && model.VertexClipFunction != nil
 		screenFromVertexPass := globalVertexScreenValid && camera.perspective && !vertexClipFunctionOn
 
+		// processVertices counted the corners of the visible triangles.
+		for indexListIndex+vertexListIndex-startingVertexListIndex >= len(indexList) {
+			growDisplayLists()
+		}
+
 		vertexListIndex = startingVertexListIndex
+		nextVertexStamp()
 
 		if lighting {
 			camera.DebugInfo.currentLightTime.StartTimer()
@@ -1617,6 +1623,15 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 			for vi := range 3 {
 
 				vertexIndex := triangle.VertexIndex(vi)
+
+				// Each vertex of the mesh part goes into the vertex lists once.
+				if globalVertexStamp[vertexIndex] == globalVertexStampNow {
+					indexList[indexListIndex] = uint16(globalVertexSlot[vertexIndex])
+					indexListIndex++
+					continue
+				}
+				globalVertexStamp[vertexIndex] = globalVertexStampNow
+				globalVertexSlot[vertexIndex] = int32(vertexListIndex)
 
 				// We clip the vertices to the screen here manually because it wasn't being inlined previously.
 
@@ -1795,7 +1810,8 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 				}
 
-				indexList[vertexListIndex] = uint16(vertexListIndex)
+				indexList[indexListIndex] = uint16(vertexListIndex)
+				indexListIndex++
 				vertexListIndex++
 			}
 
@@ -1811,7 +1827,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	flush := func(rp renderPair) {
 
 		if vertexListIndex == 0 {
-			vertexListIndex = 0
+			indexListIndex = 0
 			return
 		}
 
@@ -1903,13 +1919,13 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 				shaderOpt := &draw.clipOptions
 				shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture, img}
-				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:vertexListIndex], camera.clipAlphaShader, shaderOpt)
+				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:indexListIndex], camera.clipAlphaShader, shaderOpt)
 
 			} else {
 				shaderOpt := &draw.depthOptions
 				shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture}
 
-				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:vertexListIndex], camera.depthShader, shaderOpt)
+				camera.depthIntermediate.DrawTrianglesShader(depthVertexList[:vertexListIndex], indexList[:indexListIndex], camera.depthShader, shaderOpt)
 			}
 
 			if !model.isTransparent(meshPart) {
@@ -1961,7 +1977,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		if camera.RenderNormals {
 			colorPassShaderOptions.Images[0] = defaultImg
-			camera.resultNormalTexture.DrawTrianglesShader(normalVertexList[:vertexListIndex], indexList[:vertexListIndex], camera.colorShader, colorPassShaderOptions)
+			camera.resultNormalTexture.DrawTrianglesShader(normalVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
 			// camera.resultNormalTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
 		}
 
@@ -1986,9 +2002,9 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 						colorPassShaderOptions.Images[3] = mat.FragmentShaderOptions.Images[3]
 					}
 				}
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:vertexListIndex], mat.fragmentShader, colorPassShaderOptions)
+				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], mat.fragmentShader, colorPassShaderOptions)
 			} else {
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:vertexListIndex], camera.colorShader, colorPassShaderOptions)
+				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
 			}
 
 			// camera.resultColorTexture.DrawRectShader(w, h, camera.colorShader, rectShaderOptions)
@@ -1997,19 +2013,20 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			if hasFragShader {
 				// TODO: Review usage of FragmentShaderOptions here.
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:vertexListIndex], mat.fragmentShader, mat.FragmentShaderOptions)
+				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], mat.fragmentShader, mat.FragmentShaderOptions)
 			} else {
-				camera.resultColorTexture.DrawTriangles(colorVertexList[:vertexListIndex], indexList[:vertexListIndex], img, colorPassOptions)
+				camera.resultColorTexture.DrawTriangles(colorVertexList[:vertexListIndex], indexList[:indexListIndex], img, colorPassOptions)
 			}
 
 		}
 
 		if camera.DebugInfo.On {
-			camera.DebugInfo.drawnTris += vertexListIndex / 3
+			camera.DebugInfo.drawnTris += indexListIndex / 3
 			camera.DebugInfo.drawnParts++
 		}
 
 		vertexListIndex = 0
+		indexListIndex = 0
 
 	}
 
