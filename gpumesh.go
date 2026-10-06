@@ -186,6 +186,70 @@ func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot v
 }
 `
 
+// gpuBendSource is the vertex function of gpuRigidSource for a model with a
+// Bend: it bends each point of the mesh about two joints before the record
+// places it. The colour alpha of a vertex holds its joint value, see Bend,
+// and the vertex draws opaque. GPUBendFirst and GPUBendSecond are the two
+// joint transforms of the Bend, and GPUBendStretch holds its direction and
+// its stretch minus 1.
+const gpuBendSource = `
+
+var GPUVertexMatrix mat4
+var GPUVertexDepth vec4
+var GPUVertexTint vec4
+var GPUVertexTexSize vec2
+var GPUMeshCull vec4
+var GPUBendFirst mat4
+var GPUBendSecond mat4
+var GPUBendStretch vec4
+
+func Vertex(dstPos vec2, srcPos vec2, color vec4, custom vec4, iPos vec2, iRot vec2, iTint vec4, iCustom vec4) (vec4, vec2, vec4, vec4) {
+	v := color.a
+	b := vec3(dstPos, custom.x)
+	n := custom.yzw
+	if v >= 2 {
+		b = mix(b, (GPUBendSecond * vec4(b, 1)).xyz, v-2)
+		n = mix(n, (GPUBendSecond * vec4(n, 0)).xyz, v-2)
+		b = (GPUBendFirst * vec4(b, 1)).xyz
+		n = (GPUBendFirst * vec4(n, 0)).xyz
+	} else {
+		b = mix(b, (GPUBendFirst * vec4(b, 1)).xyz, v)
+		n = mix(n, (GPUBendFirst * vec4(n, 0)).xyz, v)
+	}
+	b += GPUBendStretch.xyz * (GPUBendStretch.w * dot(b, GPUBendStretch.xyz))
+	r0 := iTint.xyz
+	r1 := iCustom.xyz
+	r2 := iRot.y * cross(r0, r1)
+	world := vec4(b.x*r0+b.y*r1+b.z*r2+vec3(iPos, iRot.x), 1)
+	n = n.x*cross(r1, r2) + n.y*cross(r2, r0) + n.z*cross(r0, r1)
+	back := GPUMeshCull.w*dot(n, GPUMeshCull.xyz-world.xyz) < 0
+	view := GPUMeshCull.xyz - world.xyz
+	world.xyz += iCustom.w * view / max(length(view), 0.001)
+	p := GPUVertexMatrix * world
+	pos := imageDstProjection() * vec4(p.xy+imageDstOrigin()*p.w, p.z, p.w)
+	if back {
+		pos = vec4(0, 0, 2, 1)
+	}
+	return pos, srcPos*GPUVertexTexSize + imageSrc0Origin(), vec4(color.rgb, 1) * GPUVertexTint * vec4(1, 1, 1, iTint.a), vec4(0, dot(GPUVertexDepth, world), 0, 0)
+}
+`
+
+// Bend bends the mesh of a model on the mesh path about two joints, for a
+// model with a GPU mesh whose colour alpha holds the joint value of each
+// vertex, see Mesh.BuildGPUMeshFunc. A vertex with the value w from 0 to 1
+// moves by the share w of the turn First. A vertex with the value 2 + w
+// moves by the share w of the turn Second, and then by the whole of First.
+// The transforms apply to a point as Matrix4.MultVec does. Then a Stretch
+// s > 1 lengthens the mesh from its origin along the unit direction Along:
+// a point p moves by Along times (s - 1) times the dot product of p and
+// Along. The value of a vertex replaces its colour alpha, so the vertex
+// draws opaque.
+type Bend struct {
+	First, Second Matrix4
+	Stretch       float32
+	Along         Vector3
+}
+
 // withGPUMesh returns the shader source src with the vertex function of the
 // mesh path.
 func withGPUMesh(src []byte) []byte {
@@ -204,10 +268,20 @@ func withGPURigid(src []byte) []byte {
 	return append(append([]byte(nil), src...), gpuRigidSource...)
 }
 
+// withGPUBend returns the shader source src with the vertex function of the
+// mesh path for models with a Bend.
+func withGPUBend(src []byte) []byte {
+	return append(append([]byte(nil), src...), gpuBendSource...)
+}
+
 // rigidShaders holds the variant for the mesh path of each shader that
 // ExtendBase3DShader makes, so that a material with such a shader can draw
 // on the mesh path.
 var rigidShaders = map[*ebiten.Shader]*ebiten.Shader{}
+
+// bendShaders holds the variant for models with a Bend of each shader that
+// ExtendBase3DShader makes.
+var bendShaders = map[*ebiten.Shader]*ebiten.Shader{}
 
 // rigidRecord returns the instance record of gpuRigidSource for model, with
 // a depth bias.
@@ -329,7 +403,11 @@ func (camera *Camera) gpuMeshPart(model *Model, part *MeshPart, lighting bool) b
 		return false
 	}
 	mat := part.Material
-	return mat == nil || mat.TransparencyMode != TransparencyModeAlphaClip && (!mat.shaderOn() || rigidShaders[mat.fragmentShader] != nil)
+	variants := rigidShaders
+	if model.GPUBend != nil {
+		variants = bendShaders
+	}
+	return mat == nil || mat.TransparencyMode != TransparencyModeAlphaClip && (!mat.shaderOn() || variants[mat.fragmentShader] != nil)
 }
 
 // MeshBatch is a mesh that Camera.RenderMeshes draws once for each instance
@@ -370,7 +448,11 @@ func (s *drawScratch) groupRigid(camera *Camera) {
 	for i := range s.rigid {
 		r := &s.rigid[i]
 		g := r.part.meshGroup - 1
-		if g >= 0 && !sameRGB(s.meshDraws[g].model, r.model) {
+		if r.model.GPUBend != nil {
+			// A bent model has uniforms of its own, so a draw of its own.
+			g = len(s.meshDraws)
+			s.meshDraws = append(s.meshDraws, meshDraw{part: r.part, model: r.model})
+		} else if g >= 0 && !sameRGB(s.meshDraws[g].model, r.model) {
 			g = -1
 			for j := range s.meshDraws {
 				if d := &s.meshDraws[j]; d.part == r.part && sameRGB(d.model, r.model) {
@@ -383,6 +465,9 @@ func (s *drawScratch) groupRigid(camera *Camera) {
 			g = len(s.meshDraws)
 			s.meshDraws = append(s.meshDraws, meshDraw{part: r.part, model: r.model})
 			r.part.meshGroup = g + 1
+		}
+		if r.model.GPUBend != nil {
+			r.part.meshGroup = 0
 		}
 		r.group = g
 		s.meshDraws[g].n++
@@ -487,6 +572,9 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 			}
 		}
 		draw.setGPUUniforms(&vp, clip, w, h, margin, spread, tint, srcW, srcH)
+		if d.model != nil && d.model.GPUBend != nil {
+			draw.setBendUniforms(d.model.GPUBend)
+		}
 		draw.meshCull[0], draw.meshCull[1], draw.meshCull[2], draw.meshCull[3] = camPos.X, camPos.Y, camPos.Z, facing
 	}
 
@@ -498,7 +586,9 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		uniforms(d)
 		opt.Mesh = d.part.gpuMesh
 		shader := camera.depthShaderMesh
-		if d.model != nil {
+		if d.model != nil && d.model.GPUBend != nil {
+			shader = camera.depthShaderBend
+		} else if d.model != nil {
 			shader = camera.depthShaderRigid
 		} else if d.pose {
 			shader = camera.depthShaderPose
@@ -534,11 +624,15 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 			shader = camera.colorShaderPose
 		}
 		if d.model != nil {
+			variants := rigidShaders
 			shader = camera.colorShaderRigid
+			if d.model.GPUBend != nil {
+				shader, variants = camera.colorShaderBend, bendShaders
+			}
 			if mat.shaderOn() {
 				// A fragment shader of a material, with its uniforms and
 				// images, as on the sorted path.
-				shader = rigidShaders[mat.fragmentShader]
+				shader = variants[mat.fragmentShader]
 				if o := mat.FragmentShaderOptions; o != nil {
 					opt.Uniforms = draw.withFragmentUniforms(opt.Uniforms, o.Uniforms)
 					for i, img := range o.Images {

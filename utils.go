@@ -75,6 +75,9 @@ func ExtendBase3DShader(customFragment string) (*ebiten.Shader, error) {
 	if rigid, err := ebiten.NewShader(withGPURigid(base3DShaderSource(customFragment))); err == nil {
 		rigidShaders[shader] = rigid
 	}
+	if bend, err := ebiten.NewShader(withGPUBend(base3DShaderSource(customFragment))); err == nil {
+		bendShaders[shader] = bend
+	}
 	return shader, nil
 }
 

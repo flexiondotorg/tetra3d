@@ -39,6 +39,9 @@ type drawScratch struct {
 	// such uniforms, and Ebitengine ignores them.
 	gpuMatrix, gpuDepth, gpuTint, gpuTexSize []float32
 
+	// The uniforms of the vertex function of a model with a Bend, see
+	// gpuBendSource and setBendUniforms, in every map.
+	bendFirst, bendSecond, bendStretch []float32
 
 	// The parts, the cull uniform, and the options of the mesh path.
 	meshDraws                          []meshDraw
@@ -70,6 +73,9 @@ func newDrawScratch() *drawScratch {
 		gpuTint:               make([]float32, 4),
 		gpuTexSize:            make([]float32, 2),
 		meshCull:              make([]float32, 4),
+		bendFirst:             make([]float32, 16),
+		bendSecond:            make([]float32, 16),
+		bendStretch:           make([]float32, 4),
 	}
 	s.foglessValue = s.fogless
 	s.foglessNormal = []int{1}
@@ -107,12 +113,27 @@ func newDrawScratch() *drawScratch {
 		m["GPUVertexTint"] = s.gpuTint
 		m["GPUVertexTexSize"] = s.gpuTexSize
 		m["GPUMeshCull"] = s.meshCull
+		m["GPUBendFirst"] = s.bendFirst
+		m["GPUBendSecond"] = s.bendSecond
+		m["GPUBendStretch"] = s.bendStretch
 	}
 	s.depthOptions.Uniforms = gpu
 	s.meshDepthOptions.Uniforms = gpu
 	s.meshDepthOptions.Depth = true
 	s.meshColorOptions.Depth = true
 	return s
+}
+
+// setBendUniforms writes the uniforms of gpuBendSource for b. Column j of a
+// Kage mat4 is row j of a Matrix4, so that the mat4 applies to a point as
+// Matrix4.MultVec does.
+func (s *drawScratch) setBendUniforms(b *Bend) {
+	for r := range 4 {
+		copy(s.bendFirst[4*r:4*r+4], b.First[r][:])
+		copy(s.bendSecond[4*r:4*r+4], b.Second[r][:])
+	}
+	s.bendStretch[0], s.bendStretch[1], s.bendStretch[2] = b.Along.X, b.Along.Y, b.Along.Z
+	s.bendStretch[3] = max(b.Stretch-1, 0)
 }
 
 // setPartUniforms writes the uniform values of one mesh part, which the

@@ -46,6 +46,10 @@ type Model struct {
 	// This function is run after skinning the vertex if the material belongs to a mesh that is skinned by an armature.
 	VertexTransformFunction func(vertexPosition, vertexNormal Vector3, vertexIndex int) (Vector3, Vector3)
 
+	// GPUBend bends the mesh of the model on the mesh path of a camera with
+	// GPUMesh on, see Bend. Nil draws the mesh as it is.
+	GPUBend *Bend
+
 	// VertexClipFunction is a function that runs on the clipped result of each vertex position rendered with the material.
 	// The function takes the vertex position along with the vertex index in the mesh.
 	// This program runs after the vertex position is clipped to screen coordinates.
