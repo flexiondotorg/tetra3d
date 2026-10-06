@@ -1619,11 +1619,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		// vertices go in the order of the mesh, so that the reads of the vertex
 		// data run in order, and the indices then give the triangles in draw order.
 		stampNow := globalVertexStampNow
+		triVertexIndices := globalSortingTriangleBucket.vertexIndices
 		for _, sortingTri := range globalSortingTriangleBucket.unsetTris[:globalSortingTriangleBucket.unsetTriIndex] {
-			triangle := sortingTri.Triangle
-			globalVertexStamp[triangle.VertexIndexA] = stampNow
-			globalVertexStamp[triangle.VertexIndexB] = stampNow
-			globalVertexStamp[triangle.VertexIndexC] = stampNow
+			i := 3 * int(sortingTri.index)
+			globalVertexStamp[triVertexIndices[i]] = stampNow
+			globalVertexStamp[triVertexIndices[i+1]] = stampNow
+			globalVertexStamp[triVertexIndices[i+2]] = stampNow
 		}
 
 		scanStart, scanEnd := 0, len(mesh.VertexPositions)
@@ -1841,10 +1842,10 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		}
 
 		for _, sortingTri := range globalSortingTriangleBucket.sorted {
-			triangle := sortingTri.Triangle
-			indexList[indexListIndex] = uint16(globalVertexSlot[triangle.VertexIndexA])
-			indexList[indexListIndex+1] = uint16(globalVertexSlot[triangle.VertexIndexB])
-			indexList[indexListIndex+2] = uint16(globalVertexSlot[triangle.VertexIndexC])
+			i := 3 * int(sortingTri.index)
+			indexList[indexListIndex] = uint16(globalVertexSlot[triVertexIndices[i]])
+			indexList[indexListIndex+1] = uint16(globalVertexSlot[triVertexIndices[i+1]])
+			indexList[indexListIndex+2] = uint16(globalVertexSlot[triVertexIndices[i+2]])
 			indexListIndex += 3
 		}
 
