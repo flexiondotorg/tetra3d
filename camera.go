@@ -1528,6 +1528,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		}
 
 		model.processVertices(vpMatrix, camera, meshPart, true, autosubdivisionLevels, lighting)
+		countPart(camera, model, meshPart)
 		// lastVertexListIndex := vertexListIndex
 
 		if vertexListIndex == 0 {
