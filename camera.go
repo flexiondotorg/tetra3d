@@ -1610,197 +1610,217 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 			camera.DebugInfo.currentLightTime.EndTimer()
 		}
 
-		for _, sortingTri := range globalSortingTriangleBucket.sorted {
-
+		// Each vertex of the drawn triangles goes into the vertex lists once. The
+		// vertices go in the order of the mesh, so that the reads of the vertex
+		// data run in order, and the indices then give the triangles in draw order.
+		stampNow := globalVertexStampNow
+		for _, sortingTri := range globalSortingTriangleBucket.unsetTris[:globalSortingTriangleBucket.unsetTriIndex] {
 			triangle := sortingTri.Triangle
+			globalVertexStamp[triangle.VertexIndexA] = stampNow
+			globalVertexStamp[triangle.VertexIndexB] = stampNow
+			globalVertexStamp[triangle.VertexIndexC] = stampNow
+		}
 
-			for vi := range 3 {
+		scanStart, scanEnd := 0, len(mesh.VertexPositions)
+		if !mesh.autoSubdivide {
+			scanStart, scanEnd = meshPart.vertexRange()
+		}
 
-				vertexIndex := triangle.VertexIndex(vi)
+		vertexUVs := mesh.VertexUVs
+		var vertexColors []Color4
+		hasVertexColors := mesh.VertexActiveColorChannel >= 0
+		if hasVertexColors {
+			vertexColors = mesh.VertexColors[mesh.VertexActiveColorChannel].colors
+		}
 
-				// Each vertex of the mesh part goes into the vertex lists once.
-				if globalVertexStamp[vertexIndex] == globalVertexStampNow {
-					indexList[indexListIndex] = uint16(globalVertexSlot[vertexIndex])
-					indexListIndex++
-					continue
-				}
-				globalVertexStamp[vertexIndex] = globalVertexStampNow
-				globalVertexSlot[vertexIndex] = int32(vertexListIndex)
+		for vertexIndex := scanStart; vertexIndex < scanEnd; vertexIndex++ {
 
-				// We clip the vertices to the screen here manually because it wasn't being inlined previously.
+			if globalVertexStamp[vertexIndex] != stampNow {
+				continue
+			}
+			globalVertexSlot[vertexIndex] = int32(vertexListIndex)
+			out := &colorVertexList[vertexListIndex]
 
-				// CLIP SCREEN START
-				w := globalVertexTransforms[vertexIndex].W
+			// We clip the vertices to the screen here manually because it wasn't being inlined previously.
 
-				var dx, dy float32
+			// CLIP SCREEN START
+			w := globalVertexTransforms[vertexIndex].W
 
-				if screenFromVertexPass && w >= 0 {
+			var dx, dy float32
 
-					// The vertex pass divided by the same w, and y / -w is -(y / w) exactly.
-					s := globalVertexScreen[vertexIndex]
-					dx = float32(s.X*float32(camWidth) + halfCamWidth)
-					dy = float32((-s.Y)*float32(camHeight) + halfCamHeight)
+			if screenFromVertexPass && w >= 0 {
 
-				} else {
+				// The vertex pass divided by the same w, and y / -w is -(y / w) exactly.
+				s := globalVertexScreen[vertexIndex]
+				dx = float32(s.X*float32(camWidth) + halfCamWidth)
+				dy = float32((-s.Y)*float32(camHeight) + halfCamHeight)
 
-					if !camera.perspective {
-						w = 1.0
-					}
+			} else {
 
-					// If the trangle is beyond the screen, we'll just pretend it's not and limit it to the closest possible value > 0
-					// If it's too small, there will be visual artifacts when the camera is right up against surfaces
-					// If it's too large, then textures and vertices will appear to warp and bend "around" the screen, towards the "back" of the camera
-					if w < 0 {
-						w = 0.001
-					}
-
-					target := globalVertexTransforms[vertexIndex]
-
-					if vertexClipFunctionOn {
-						target = model.VertexClipFunction(target, vertexIndex)
-					}
-
-					dx = float32((target.X/w)*float32(camWidth) + halfCamWidth)
-					dy = float32((target.Y/-w)*float32(camHeight) + halfCamHeight)
-
+				if !camera.perspective {
+					w = 1.0
 				}
 
-				// CLIP SCREEN END
-
-				colorVertexList[vertexListIndex].DstX = dx
-				colorVertexList[vertexListIndex].DstY = dy
-
-				var uvU, uvV float32
-
-				// We set the UVs back here because we might need to use them if the material has clip alpha enabled.
-				// We do 1 - v here (aka Y in texture coordinates) because 1.0 is the top of the texture while 0 is the bottom in UV coordinates,
-				// but when drawing textures 0 is the top, and the sourceHeight is the bottom.
-				if camera.PerspectiveCorrectedTextureMapping {
-					uvU = float32((mesh.VertexUVs[vertexIndex].X / w) * srcW)
-					uvV = float32(((1 - mesh.VertexUVs[vertexIndex].Y) / w) * srcH)
-				} else {
-					uvU = float32(mesh.VertexUVs[vertexIndex].X * srcW)
-					uvV = float32((1 - mesh.VertexUVs[vertexIndex].Y) * srcH)
+				// If the trangle is beyond the screen, we'll just pretend it's not and limit it to the closest possible value > 0
+				// If it's too small, there will be visual artifacts when the camera is right up against surfaces
+				// If it's too large, then textures and vertices will appear to warp and bend "around" the screen, towards the "back" of the camera
+				if w < 0 {
+					w = 0.001
 				}
 
-				colorVertexList[vertexListIndex].SrcX = uvU
-				colorVertexList[vertexListIndex].SrcY = uvV
+				target := globalVertexTransforms[vertexIndex]
 
-				if camera.PerspectiveCorrectedTextureMapping {
-					d := 1.0 / float32(w)
-					colorVertexList[vertexListIndex].Custom0 = d // Set the perspective divide here
-					// normalVertexList[vertexListIndex].Custom0 = d
+				if vertexClipFunctionOn {
+					target = model.VertexClipFunction(target, vertexIndex)
 				}
 
-				if camera.RenderNormals {
+				dx = float32((target.X/w)*float32(camWidth) + halfCamWidth)
+				dy = float32((target.Y/-w)*float32(camHeight) + halfCamHeight)
 
-					normalVertexList[vertexListIndex].DstX = dx
-					normalVertexList[vertexListIndex].DstY = dy
-
-					normalVertexList[vertexListIndex].SrcX = uvU
-					normalVertexList[vertexListIndex].SrcY = uvV
-
-					normalVertexList[vertexListIndex].ColorR = float32(globalVertexTransformedNormals[vertexIndex].X*0.5 + 0.5)
-					normalVertexList[vertexListIndex].ColorG = float32(globalVertexTransformedNormals[vertexIndex].Y*0.5 + 0.5)
-					normalVertexList[vertexListIndex].ColorB = float32(globalVertexTransformedNormals[vertexIndex].Z*0.5 + 0.5)
-
-				}
-
-				// Vertex colors
-
-				if activeChannel := mesh.VertexActiveColorChannel; activeChannel >= 0 {
-					colorVertexList[vertexListIndex].ColorR = mesh.VertexColors[activeChannel].colors[vertexIndex].R * mpColor.R
-					colorVertexList[vertexListIndex].ColorG = mesh.VertexColors[activeChannel].colors[vertexIndex].G * mpColor.G
-					colorVertexList[vertexListIndex].ColorB = mesh.VertexColors[activeChannel].colors[vertexIndex].B * mpColor.B
-					colorVertexList[vertexListIndex].ColorA = mesh.VertexColors[activeChannel].colors[vertexIndex].A * mpColor.A
-				} else {
-					colorVertexList[vertexListIndex].ColorR = mpColor.R
-					colorVertexList[vertexListIndex].ColorG = mpColor.G
-					colorVertexList[vertexListIndex].ColorB = mpColor.B
-					colorVertexList[vertexListIndex].ColorA = mpColor.A
-				}
-
-				if lighting {
-					colorVertexList[vertexListIndex].ColorR *= mesh.vertexLights.colors[vertexIndex].R
-					colorVertexList[vertexListIndex].ColorG *= mesh.vertexLights.colors[vertexIndex].G
-					colorVertexList[vertexListIndex].ColorB *= mesh.vertexLights.colors[vertexIndex].B
-				}
-
-				if camera.RenderDepth {
-
-					// 3/28/23, TODO: We used to use the transformed vertex positions for rendering the depth texture. Note
-					// that this makes fog shift aggressively as you turn the camera, more noticeably in first-person games
-					// (as points closer to the corners of the screen are mathematically closer to the camera because of projection).
-					// In an attempt to fix this, I used the below, now commented-out depth function. This attempt did fix the fog,
-					// but it also made depth sorting buggier, which is unacceptable. For now, I've reverted this change to have
-					// better depth sorting. This is currently fine, though the fog issue should be resolved at some point in the future.
-
-					// See this Discord conversation for the visualization of the issue:
-					// https://discord.com/channels/842049801528016967/844522898126536725/1090223569247674488
-
-					// p, s, r := model.Transform().Inverted().Decompose()
-					// invertedCameraPos := r.MultVec(camera.WorldPosition()).Add(p.Mult(Vector{1 / s.X, 1 / s.Y, 1 / s.Z, s.W}))
-					// depth := (invertedCameraPos.Distance(mesh.VertexPositions[vertexListIndex]) - camera.near) / (camera.far - camera.near)
-
-					var vertexDepth float32
-					if rp.MeshPart.Material != nil && rp.MeshPart.Material.BillboardedDepthMode == DepthModeUnbillboarded {
-						vertexDepth = globalVertexDepthUnbillboarded[vertexIndex]
-					} else {
-						vertexDepth = globalVertexTransforms[vertexIndex].Z
-					}
-
-					if customDepthFunctionSet {
-						vertexDepth = mat.CustomDepthFunction(model, camera, meshPart, vertexIndex, vertexDepth)
-					}
-
-					depth := (vertexDepth + depthMarginPercentage) / camSpread
-
-					if depth < 0 {
-						depth = 0
-					} else if depth > 1 {
-						depth = 1
-					}
-
-					// The depth pass draws the colour vertices and reads the depth from Custom1.
-					colorVertexList[vertexListIndex].Custom1 = float32(depth)
-
-				} else if scene.World != nil && scene.World.FogOn {
-
-					vertexDepth := globalVertexTransforms[vertexIndex].Z
-
-					if customDepthFunctionSet {
-						vertexDepth = mat.CustomDepthFunction(model, camera, meshPart, vertexIndex, vertexDepth)
-					}
-
-					depth := (vertexDepth + depthMarginPercentage) / camSpread
-
-					if depth < 0 {
-						depth = 0
-					} else if depth > 1 {
-						depth = 1
-					}
-
-					// depth = 1 - depth
-
-					depth = float32(scene.World.FogRange[0] + ((scene.World.FogRange[1]-scene.World.FogRange[0])*1 - float32(depth)))
-
-					if scene.World.FogMode == FogAdd {
-						colorVertexList[vertexListIndex].ColorR += scene.World.FogColor.R * float32(depth)
-						colorVertexList[vertexListIndex].ColorG += scene.World.FogColor.G * float32(depth)
-						colorVertexList[vertexListIndex].ColorB += scene.World.FogColor.B * float32(depth)
-					} else if scene.World.FogMode == FogSub {
-						colorVertexList[vertexListIndex].ColorR *= scene.World.FogColor.R * float32(depth)
-						colorVertexList[vertexListIndex].ColorG *= scene.World.FogColor.G * float32(depth)
-						colorVertexList[vertexListIndex].ColorB *= scene.World.FogColor.B * float32(depth)
-					}
-
-				}
-
-				indexList[indexListIndex] = uint16(vertexListIndex)
-				indexListIndex++
-				vertexListIndex++
 			}
 
+			// CLIP SCREEN END
+
+			out.DstX = dx
+			out.DstY = dy
+
+			var uvU, uvV float32
+			uv := vertexUVs[vertexIndex]
+
+			// We set the UVs back here because we might need to use them if the material has clip alpha enabled.
+			// We do 1 - v here (aka Y in texture coordinates) because 1.0 is the top of the texture while 0 is the bottom in UV coordinates,
+			// but when drawing textures 0 is the top, and the sourceHeight is the bottom.
+			if camera.PerspectiveCorrectedTextureMapping {
+				uvU = float32((uv.X / w) * srcW)
+				uvV = float32(((1 - uv.Y) / w) * srcH)
+			} else {
+				uvU = float32(uv.X * srcW)
+				uvV = float32((1 - uv.Y) * srcH)
+			}
+
+			out.SrcX = uvU
+			out.SrcY = uvV
+
+			if camera.PerspectiveCorrectedTextureMapping {
+				d := 1.0 / float32(w)
+				out.Custom0 = d // Set the perspective divide here
+				// normalVertexList[vertexListIndex].Custom0 = d
+			}
+
+			if camera.RenderNormals {
+
+				normalVertexList[vertexListIndex].DstX = dx
+				normalVertexList[vertexListIndex].DstY = dy
+
+				normalVertexList[vertexListIndex].SrcX = uvU
+				normalVertexList[vertexListIndex].SrcY = uvV
+
+				normalVertexList[vertexListIndex].ColorR = float32(globalVertexTransformedNormals[vertexIndex].X*0.5 + 0.5)
+				normalVertexList[vertexListIndex].ColorG = float32(globalVertexTransformedNormals[vertexIndex].Y*0.5 + 0.5)
+				normalVertexList[vertexListIndex].ColorB = float32(globalVertexTransformedNormals[vertexIndex].Z*0.5 + 0.5)
+
+			}
+
+			// Vertex colors
+
+			if hasVertexColors {
+				c := vertexColors[vertexIndex]
+				out.ColorR = c.R * mpColor.R
+				out.ColorG = c.G * mpColor.G
+				out.ColorB = c.B * mpColor.B
+				out.ColorA = c.A * mpColor.A
+			} else {
+				out.ColorR = mpColor.R
+				out.ColorG = mpColor.G
+				out.ColorB = mpColor.B
+				out.ColorA = mpColor.A
+			}
+
+			if lighting {
+				out.ColorR *= mesh.vertexLights.colors[vertexIndex].R
+				out.ColorG *= mesh.vertexLights.colors[vertexIndex].G
+				out.ColorB *= mesh.vertexLights.colors[vertexIndex].B
+			}
+
+			if camera.RenderDepth {
+
+				// 3/28/23, TODO: We used to use the transformed vertex positions for rendering the depth texture. Note
+				// that this makes fog shift aggressively as you turn the camera, more noticeably in first-person games
+				// (as points closer to the corners of the screen are mathematically closer to the camera because of projection).
+				// In an attempt to fix this, I used the below, now commented-out depth function. This attempt did fix the fog,
+				// but it also made depth sorting buggier, which is unacceptable. For now, I've reverted this change to have
+				// better depth sorting. This is currently fine, though the fog issue should be resolved at some point in the future.
+
+				// See this Discord conversation for the visualization of the issue:
+				// https://discord.com/channels/842049801528016967/844522898126536725/1090223569247674488
+
+				// p, s, r := model.Transform().Inverted().Decompose()
+				// invertedCameraPos := r.MultVec(camera.WorldPosition()).Add(p.Mult(Vector{1 / s.X, 1 / s.Y, 1 / s.Z, s.W}))
+				// depth := (invertedCameraPos.Distance(mesh.VertexPositions[vertexListIndex]) - camera.near) / (camera.far - camera.near)
+
+				var vertexDepth float32
+				if rp.MeshPart.Material != nil && rp.MeshPart.Material.BillboardedDepthMode == DepthModeUnbillboarded {
+					vertexDepth = globalVertexDepthUnbillboarded[vertexIndex]
+				} else {
+					vertexDepth = globalVertexTransforms[vertexIndex].Z
+				}
+
+				if customDepthFunctionSet {
+					vertexDepth = mat.CustomDepthFunction(model, camera, meshPart, vertexIndex, vertexDepth)
+				}
+
+				depth := (vertexDepth + depthMarginPercentage) / camSpread
+
+				if depth < 0 {
+					depth = 0
+				} else if depth > 1 {
+					depth = 1
+				}
+
+				// The depth pass draws the colour vertices and reads the depth from Custom1.
+				out.Custom1 = float32(depth)
+
+			} else if scene.World != nil && scene.World.FogOn {
+
+				vertexDepth := globalVertexTransforms[vertexIndex].Z
+
+				if customDepthFunctionSet {
+					vertexDepth = mat.CustomDepthFunction(model, camera, meshPart, vertexIndex, vertexDepth)
+				}
+
+				depth := (vertexDepth + depthMarginPercentage) / camSpread
+
+				if depth < 0 {
+					depth = 0
+				} else if depth > 1 {
+					depth = 1
+				}
+
+				// depth = 1 - depth
+
+				depth = float32(scene.World.FogRange[0] + ((scene.World.FogRange[1]-scene.World.FogRange[0])*1 - float32(depth)))
+
+				if scene.World.FogMode == FogAdd {
+					out.ColorR += scene.World.FogColor.R * float32(depth)
+					out.ColorG += scene.World.FogColor.G * float32(depth)
+					out.ColorB += scene.World.FogColor.B * float32(depth)
+				} else if scene.World.FogMode == FogSub {
+					out.ColorR *= scene.World.FogColor.R * float32(depth)
+					out.ColorG *= scene.World.FogColor.G * float32(depth)
+					out.ColorB *= scene.World.FogColor.B * float32(depth)
+				}
+
+			}
+
+			vertexListIndex++
+		}
+
+		for _, sortingTri := range globalSortingTriangleBucket.sorted {
+			triangle := sortingTri.Triangle
+			indexList[indexListIndex] = uint16(globalVertexSlot[triangle.VertexIndexA])
+			indexList[indexListIndex+1] = uint16(globalVertexSlot[triangle.VertexIndexB])
+			indexList[indexListIndex+2] = uint16(globalVertexSlot[triangle.VertexIndexC])
+			indexListIndex += 3
 		}
 
 		// for i := 0; i < vertexListIndex; i++ {
