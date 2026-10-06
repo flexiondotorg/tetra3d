@@ -18,6 +18,10 @@ import (
 type drawScratch struct {
 	solids, transparents []renderPair
 
+	// batch holds the parts whose depth Camera.Render drew, and whose colour
+	// it draws when the batch ends, see Camera.DepthInParts.
+	batch []batchPart
+
 	colorShaderOptions ebiten.DrawTrianglesShaderOptions
 	colorOptions       ebiten.DrawTrianglesOptions
 	depthOptions       ebiten.DrawTrianglesShaderOptions
@@ -64,6 +68,15 @@ type drawScratch struct {
 	// foglessValue holds fogless. foglessNormal is the value of Fogless in a
 	// normal render, an int like the literal 1 that it stands for.
 	foglessValue, foglessNormal any
+}
+
+// batchPart is one part of a batch: its render pair, and the places of its
+// vertices and indices in the vertex lists and the index list. The places
+// stay valid when growDisplayLists moves the lists.
+type batchPart struct {
+	pair                   renderPair
+	vertexStart, vertexEnd int
+	indexStart, indexEnd   int
 }
 
 func newDrawScratch() *drawScratch {
