@@ -9,8 +9,8 @@ import (
 )
 
 // frames takes the steps of the tests that draw, and runs each one in the
-// Update of its own frame, as ReadPixels needs a running game. It is nil
-// when the tests do not run inside a game.
+// Update of its own frame, as the depth buffers of the mesh path clear once
+// a frame. It is nil when the tests do not run inside a game.
 var frames chan func()
 
 // TestMain runs the tests inside a small Ebitengine window when a display is
@@ -68,3 +68,5 @@ func inFrame(t *testing.T, f func()) {
 	}
 	<-done
 }
+
+// TestGPUMeshNearestColour draws a red cube in front of a green one with the
