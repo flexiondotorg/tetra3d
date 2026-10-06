@@ -20,7 +20,6 @@ const startingDisplayListSize = 30_000 // 30000 / 3 = 10000 tris
 
 var colorVertexList = make([]ebiten.Vertex, startingDisplayListSize) // Max triangle count is 1431655765, but the display lists can have more sensible starting capacities.
 var normalVertexList = make([]ebiten.Vertex, startingDisplayListSize)
-var depthVertexList = make([]ebiten.Vertex, startingDisplayListSize)
 var indexList = make([]uint16, startingDisplayListSize)
 
 var vertexListIndex = 0
@@ -77,7 +76,6 @@ func init() {
 func growDisplayLists() {
 	colorVertexList = slices.Grow(colorVertexList, cap(colorVertexList)*2)
 	normalVertexList = slices.Grow(normalVertexList, cap(normalVertexList)*2)
-	depthVertexList = slices.Grow(depthVertexList, cap(depthVertexList)*2)
 	indexList = slices.Grow(indexList, cap(indexList)*2)
 	globalVertexTransforms = slices.Grow(globalVertexTransforms, cap(globalVertexTransforms)*2)
 	globalVertexTransformedNormals = slices.Grow(globalVertexTransformedNormals, cap(globalVertexTransformedNormals)*2)
@@ -89,10 +87,6 @@ func growDisplayLists() {
 
 	for i := len(colorVertexList); i < cap(colorVertexList); i++ {
 		colorVertexList = append(colorVertexList, ebiten.Vertex{})
-	}
-
-	for i := len(depthVertexList); i < cap(depthVertexList); i++ {
-		depthVertexList = append(depthVertexList, ebiten.Vertex{})
 	}
 
 	for i := len(normalVertexList); i < cap(normalVertexList); i++ {
