@@ -307,7 +307,11 @@ type Camera struct {
 	// does not sort its triangles. Transparent and alpha-clip parts, and parts
 	// with a custom depth function, keep the sort. It needs a graphics library
 	// that tests the depth of a triangle draw, see
-	// ebiten.DrawTrianglesShaderOptions.Depth. Defaults to false.
+	// ebiten.DrawTrianglesShaderOptions.Depth. Render draws the depth of each
+	// run of such parts first, copies the depth texture once, and then draws
+	// their colour, so a run takes four render passes. The hardware depth
+	// buffer then decides between the parts of a run, and at a depth tie of
+	// less than the depth gate, the later part wins. Defaults to false.
 	DepthInParts bool
 
 	DebugInfo *DebugInfo
@@ -1566,6 +1570,11 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		draw.sortedClip[0], draw.sortedClip[1] = c.k, c.near
 	}
 
+	// partBase is the place in the vertex lists of the first vertex of the
+	// part that render writes. The indices of the part count from it, so
+	// that each part of a batch keeps the uint16 limit for itself.
+	partBase := 0
+
 	render := func(rp renderPair) {
 
 		// startingVertexListIndex := vertexListIndex
@@ -1938,11 +1947,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 			vertexListIndex++
 		}
 
+		base := int32(partBase)
 		for _, sortingTri := range globalSortingTriangleBucket.sorted {
 			i := 3 * int(sortingTri.index)
-			indexList[indexListIndex] = uint16(globalVertexSlot[triVertexIndices[i]])
-			indexList[indexListIndex+1] = uint16(globalVertexSlot[triVertexIndices[i+1]])
-			indexList[indexListIndex+2] = uint16(globalVertexSlot[triVertexIndices[i+2]])
+			indexList[indexListIndex] = uint16(globalVertexSlot[triVertexIndices[i]] - base)
+			indexList[indexListIndex+1] = uint16(globalVertexSlot[triVertexIndices[i+1]] - base)
+			indexList[indexListIndex+2] = uint16(globalVertexSlot[triVertexIndices[i+2]] - base)
 			indexListIndex += 3
 		}
 
@@ -1953,16 +1963,11 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		sceneLights = ogSceneLights
 	}
 
-	flush := func(rp renderPair) {
+	// partImage sets the options and the uniforms of the colour pass of rp,
+	// and returns its texture.
+	partImage := func(rp renderPair) *ebiten.Image {
 
-		if vertexListIndex == 0 {
-			indexListIndex = 0
-			return
-		}
-
-		model := rp.Model
-		meshPart := rp.MeshPart
-		mat := meshPart.Material
+		mat := rp.MeshPart.Material
 
 		var img *ebiten.Image
 
@@ -2006,6 +2011,55 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		draw.setPartUniforms(perspectiveCorrection, textureFilterMode, textureMapMode, textureMapScreenSizeW, textureMapScreenSizeH)
 
+		return img
+	}
+
+	// depthRect returns the pixels that the vertex lists can cover, see
+	// depthPassRect.
+	depthRect := func() (image.Rectangle, bool) {
+		if listBoundsOn {
+			return listBounds.rect(camWidth, camHeight)
+		}
+		return depthPassRect(colorVertexList[:vertexListIndex], camWidth, camHeight)
+	}
+
+	// clearDepthIntermediate clears rect of depthIntermediate, or all of it
+	// when partial is false.
+	clearDepthIntermediate := func(rect image.Rectangle, partial bool) {
+		if !partial {
+			camera.depthIntermediate.Clear()
+		} else if !rect.Empty() {
+			setDepthRectQuad(rect)
+			camera.depthIntermediate.DrawTriangles(depthRectVertices[:], depthRectIndices[:], defaultImg, &depthRectClearOptions)
+		}
+	}
+
+	// copyDepthIntermediate copies rect of depthIntermediate into
+	// resultDepthTexture, or all of it when partial is false.
+	copyDepthIntermediate := func(rect image.Rectangle, partial bool) {
+		if !partial {
+			camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
+		} else if !rect.Empty() {
+			setDepthRectQuad(rect)
+			camera.resultDepthTexture.DrawTriangles(depthRectVertices[:], depthRectIndices[:], camera.depthIntermediate, &depthRectCopyOptions)
+		}
+	}
+
+	var drawColor func(rp renderPair, img *ebiten.Image, verts []ebiten.Vertex, indices []uint16)
+
+	flush := func(rp renderPair) {
+
+		if vertexListIndex == 0 {
+			indexListIndex = 0
+			return
+		}
+
+		model := rp.Model
+		meshPart := rp.MeshPart
+		mat := meshPart.Material
+
+		img := partImage(rp)
+
 		// Render the depth map here
 		if camera.RenderDepth {
 
@@ -2035,20 +2089,8 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			// The depth and colour draws of this part touch only the pixels inside the
 			// bounds of its vertices, so the clear and the copy can stay inside them too.
-			var rect image.Rectangle
-			var partial bool
-			if listBoundsOn {
-				rect, partial = listBounds.rect(camWidth, camHeight)
-			} else {
-				rect, partial = depthPassRect(colorVertexList[:vertexListIndex], camWidth, camHeight)
-			}
-
-			if !partial {
-				camera.depthIntermediate.Clear()
-			} else if !rect.Empty() {
-				setDepthRectQuad(rect)
-				camera.depthIntermediate.DrawTriangles(depthRectVertices[:], depthRectIndices[:], defaultImg, &depthRectClearOptions)
-			}
+			rect, partial := depthRect()
+			clearDepthIntermediate(rect, partial)
 
 			if transparencyMode == TransparencyModeAlphaClip {
 
@@ -2069,15 +2111,24 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 			}
 
 			if !model.isTransparent(meshPart) {
-				if !partial {
-					camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
-				} else if !rect.Empty() {
-					setDepthRectQuad(rect)
-					camera.resultDepthTexture.DrawTriangles(depthRectVertices[:], depthRectIndices[:], camera.depthIntermediate, &depthRectCopyOptions)
-				}
+				copyDepthIntermediate(rect, partial)
 			}
 
 		}
+
+		drawColor(rp, img, colorVertexList[:vertexListIndex], indexList[:indexListIndex])
+
+		vertexListIndex = 0
+		indexListIndex = 0
+
+	}
+
+	// drawColor draws the colour pass of rp with the texture img, the
+	// vertices verts, and the indices indices.
+	drawColor = func(rp renderPair, img *ebiten.Image, verts []ebiten.Vertex, indices []uint16) {
+
+		mat := rp.MeshPart.Material
+		colorPassOptions := &draw.colorOptions
 
 		hasFragShader := mat != nil && mat.fragmentShader != nil && mat.FragmentShaderOn
 
@@ -2126,8 +2177,8 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		if camera.RenderNormals {
 			colorPassShaderOptions.Images[0] = defaultImg
-			camera.resultNormalTexture.DrawTrianglesShader(normalVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
-			// camera.resultNormalTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
+			camera.resultNormalTexture.DrawTrianglesShader(normalVertexList[:vertexListIndex], indices, camera.colorShader, colorPassShaderOptions)
+			// camera.resultNormalTexture.DrawTrianglesShader(verts, indices, camera.colorShader, colorPassShaderOptions)
 		}
 
 		if camera.RenderDepth {
@@ -2157,12 +2208,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 				if partDepthOn {
 					shader = sortedShaders[shader]
 				}
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], shader, colorPassShaderOptions)
+				camera.resultColorTexture.DrawTrianglesShader(verts, indices, shader, colorPassShaderOptions)
 			} else {
 				if partDepthOn {
-					camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShaderSorted, colorPassShaderOptions)
+					camera.resultColorTexture.DrawTrianglesShader(verts, indices, camera.colorShaderSorted, colorPassShaderOptions)
 				} else {
-					camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], camera.colorShader, colorPassShaderOptions)
+					camera.resultColorTexture.DrawTrianglesShader(verts, indices, camera.colorShader, colorPassShaderOptions)
 				}
 			}
 
@@ -2172,21 +2223,99 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			if hasFragShader {
 				// TODO: Review usage of FragmentShaderOptions here.
-				camera.resultColorTexture.DrawTrianglesShader(colorVertexList[:vertexListIndex], indexList[:indexListIndex], mat.fragmentShader, mat.FragmentShaderOptions)
+				camera.resultColorTexture.DrawTrianglesShader(verts, indices, mat.fragmentShader, mat.FragmentShaderOptions)
 			} else {
-				camera.resultColorTexture.DrawTriangles(colorVertexList[:vertexListIndex], indexList[:indexListIndex], img, colorPassOptions)
+				camera.resultColorTexture.DrawTriangles(verts, indices, img, colorPassOptions)
 			}
 
 		}
 
 		if camera.DebugInfo.On {
-			camera.DebugInfo.drawnTris += indexListIndex / 3
+			camera.DebugInfo.drawnTris += len(indices) / 3
 			camera.DebugInfo.drawnParts++
 		}
 
+	}
+
+	// flushBatch draws the parts of draw.batch: the depth of each part into
+	// depthIntermediate, one copy into resultDepthTexture, and then the
+	// colour of each part, in the order of the batch. The hardware depth
+	// buffer of depthIntermediate holds the depth of the earlier parts of the
+	// frame, so the parts need no copy between them, see Camera.DepthInParts.
+	flushBatch := func() {
+		if len(draw.batch) == 0 {
+			return
+		}
+		on := partDepthOn
+		partDepthOn = true
+
+		rect, partial := depthRect()
+		clearDepthIntermediate(rect, partial)
+		shaderOpt := &draw.depthOptions
+		shaderOpt.Images = [4]*ebiten.Image{camera.resultDepthTexture}
+		shaderOpt.Depth = true
+		for _, p := range draw.batch {
+			camera.depthIntermediate.DrawTrianglesShader(colorVertexList[p.vertexStart:p.vertexEnd], indexList[p.indexStart:p.indexEnd], camera.depthShaderSorted, shaderOpt)
+		}
+		copyDepthIntermediate(rect, partial)
+
+		for _, p := range draw.batch {
+			drawColor(p.pair, partImage(p.pair), colorVertexList[p.vertexStart:p.vertexEnd], indexList[p.indexStart:p.indexEnd])
+		}
+
+		clear(draw.batch)
+		draw.batch = draw.batch[:0]
 		vertexListIndex = 0
 		indexListIndex = 0
+		partDepthOn = on
+	}
 
+	// renderPart writes the vertices and the indices of pair into the lists,
+	// or those of every model of a dynamic batcher, which draw as one part.
+	renderPart := func(pair renderPair) {
+		if !pair.Model.DynamicBatcher() {
+			render(pair)
+			return
+		}
+
+		// Internally, the idea behind dynamic batching is that we simply hold off on flushing until the
+		// end - this saves a lot of time if we're rendering singular low-poly objects, at the cost of each
+		// object sharing the same material / object-level properties (color / material blending mode, for
+		// example).
+
+		modelSlice := pair.Model.DynamicBatchModels[pair.MeshPart]
+
+		// slices.SortFunc runs the same pattern-defeating quicksort as
+		// sort.Slice, so the order stays the same, without its
+		// allocations.
+		slices.SortFunc(modelSlice, func(a, b *Model) int {
+			da, db := camera.DistanceSquaredTo(a), camera.DistanceSquaredTo(b)
+			if da > db {
+				return -1
+			}
+			if db > da {
+				return 1
+			}
+			return 0
+		})
+
+		for _, merged := range modelSlice {
+
+			if !merged.visible {
+				continue
+			}
+
+			if merged.FrustumCulling {
+				merged.Transform()
+				if !camera.colliderSphereInFrustum(merged.frustumCullingSphere) {
+					continue
+				}
+			}
+
+			for _, part := range merged.mesh.MeshParts {
+				render(renderPair{Model: merged, MeshPart: part})
+			}
+		}
 	}
 
 	// The mesh path draws first, so that the sorted path compares against its
@@ -2209,54 +2338,27 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 				continue
 			}
 
-			// Internally, the idea behind dynamic batching is that we simply hold off on flushing until the
-			// end - this saves a lot of time if we're rendering singular low-poly objects, at the cost of each
-			// object sharing the same material / object-level properties (color / material blending mode, for
-			// example).
-
-			if pair.Model.DynamicBatcher() {
-				modelSlice := pair.Model.DynamicBatchModels[pair.MeshPart]
-
-				// slices.SortFunc runs the same pattern-defeating quicksort as
-				// sort.Slice, so the order stays the same, without its
-				// allocations.
-				slices.SortFunc(modelSlice, func(a, b *Model) int {
-					da, db := camera.DistanceSquaredTo(a), camera.DistanceSquaredTo(b)
-					if da > db {
-						return -1
-					}
-					if db > da {
-						return 1
-					}
-					return 0
-				})
-
-				for _, merged := range modelSlice {
-
-					if !merged.visible {
-						continue
-					}
-
-					if merged.FrustumCulling {
-						merged.Transform()
-						if !camera.colliderSphereInFrustum(merged.frustumCullingSphere) {
-							continue
-						}
-					}
-
-					for _, part := range merged.mesh.MeshParts {
-						render(renderPair{Model: merged, MeshPart: part})
-					}
+			// A solid part with the depth test inside parts joins the batch.
+			// Any other part ends the batch, so the order of all draws stays
+			// the same.
+			if partDepthOn {
+				partBase = vertexListIndex
+				indexStart := indexListIndex
+				renderPart(pair)
+				if indexListIndex > indexStart {
+					draw.batch = append(draw.batch, batchPart{pair: pair, vertexStart: partBase, vertexEnd: vertexListIndex, indexStart: indexStart, indexEnd: indexListIndex})
 				}
-
-				flush(pair)
-
-			} else {
-				render(pair)
-				flush(pair)
+				partBase = 0
+				continue
 			}
 
+			flushBatch()
+			renderPart(pair)
+			flush(pair)
+
 		}
+
+		flushBatch()
 
 	}
 
