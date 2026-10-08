@@ -325,6 +325,23 @@ type Camera struct {
 	// less than the depth gate, the later part wins. Defaults to false.
 	DepthInParts bool
 
+	// GPUMeshDirectDepth draws the depth pass of the mesh path straight into
+	// the depth texture, with the hardware depth test against the hardware
+	// depth buffer of the depth texture, in place of a clear of an
+	// intermediate image, a draw into it, and a copy into the depth texture.
+	// The colour pass then reads the depth texture, and draws a part only
+	// where the depth texture has an alpha of 1, the alpha that the depth
+	// pass writes. It needs a perspective camera.
+	//
+	// Use it with SetDepthTexture, when the caller draws its own surfaces
+	// into the depth texture with the hardware depth test in the same frame,
+	// before Render: a pixel hides a part only through that hardware depth,
+	// not through the depth in its colour. The caller's clip z must go from 0
+	// at the near plane to w at the far plane, as on the mesh path, so z/w is
+	// far/(far-near) * (1-near/d) at a distance d along the view, and the
+	// caller must not write an alpha of 1. Defaults to false.
+	GPUMeshDirectDepth bool
+
 	DebugInfo *DebugInfo
 
 	depthShader     *ebiten.Shader
@@ -340,6 +357,10 @@ type Camera struct {
 	depthShaderPose, colorShaderPose   *ebiten.Shader
 	depthShaderBend, colorShaderBend   *ebiten.Shader
 	meshDraws, meshInstances           int
+
+	// The depth shaders of the mesh path for GPUMeshDirectDepth, see
+	// directDepthShaderSource.
+	directDepthMesh, directDepthRigid, directDepthBend, directDepthPose *ebiten.Shader
 
 	// The depth and colour shaders of the depth test inside a part, see
 	// sortedVertexSource.
@@ -584,6 +605,18 @@ func NewCamera(name string, w, h int) *Camera {
 		panic(err)
 	}
 	if cam.depthShaderSorted, err = ebiten.NewShader(withSortedVertex(depthShaderText)); err != nil {
+		panic(err)
+	}
+	if cam.directDepthMesh, err = ebiten.NewShader(withGPUMesh(directDepthShaderSource)); err != nil {
+		panic(err)
+	}
+	if cam.directDepthRigid, err = ebiten.NewShader(withGPURigid(directDepthShaderSource)); err != nil {
+		panic(err)
+	}
+	if cam.directDepthBend, err = ebiten.NewShader(withGPUBend(directDepthShaderSource)); err != nil {
+		panic(err)
+	}
+	if cam.directDepthPose, err = ebiten.NewShader(withGPUPose(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
 	if cam.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
@@ -3155,7 +3188,9 @@ func (camera *Camera) DepthTexture() *ebiten.Image {
 // every pixel of img in each frame before the camera renders: the depth in
 // the encoding of the camera in RGB, and an alpha of 0 where nothing is
 // drawn. The camera reads only whether the alpha is 0, so the alpha of a
-// drawn pixel can carry the caller's own data.
+// drawn pixel can carry the caller's own data. With GPUMeshDirectDepth, the
+// mesh path also reads whether the alpha is 1, so that data must not use
+// the alpha 1.
 func (camera *Camera) SetDepthTexture(img *ebiten.Image) {
 	if img == nil {
 		img = camera.ownDepthTexture
