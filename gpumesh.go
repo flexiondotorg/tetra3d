@@ -569,6 +569,28 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 }
 `)
 
+// directDepthShaderSource is the fragment function of the depth pass of the
+// mesh path with Camera.GPUMeshDirectDepth. It writes the depth of the
+// fragment in the encoding of the depth texture. The hardware depth test
+// keeps the nearest fragment, so the shader reads no image and does not
+// discard.
+var directDepthShaderSource = []byte(`//kage:unit pixels
+
+package main
+
+// encodeDepth takes the blue byte from the same product as the green byte,
+// so that the two always carry together.
+func encodeDepth(depth float) vec4 {
+	r := floor(depth * 255) / 255
+	g := fract(depth * 255) * 255
+	return vec4(r, floor(g) / 255, fract(g), 1)
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color, custom vec4) vec4 {
+	return encodeDepth(custom.y)
+}
+`)
+
 // clearForMeshes clears img to transparent black, as Clear does, with a draw
 // that also starts the depth test of the frame. A tile-based GPU then draws
 // the clear and the mesh draws after it in one render pass, in place of a
@@ -598,13 +620,22 @@ var clearIndices = [6]uint32{0, 1, 2, 1, 3, 2}
 // test of its own, where depthIntermediate holds a depth. So each pixel takes
 // the nearest part in both passes, with the same depth encoding as the
 // sorted path.
+//
+// With GPUMeshDirectDepth, the depth pass draws each part straight into the
+// depth texture with the hardware depth test against the depth buffer of
+// the depth texture, and the colour pass reads the depth texture in place
+// of depthIntermediate.
 func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 	if len(list) == 0 {
 		return
 	}
 	draw := camera.draw
 	vp := camera.ViewMatrix().Mult(camera.Projection())
+	direct := camera.GPUMeshDirectDepth && camera.perspective
 	clip := newGPUClip(camera.Projection(), camera.near, camera.far)
+	if direct {
+		clip = newGPUClipPlanes(camera.Projection(), camera.near, camera.far)
+	}
 	margin := (camera.far - camera.near) * camera.DepthMargin
 	spread := camera.far - camera.near + margin*2
 	w, h := camera.resultColorTexture.Bounds().Dx(), camera.resultColorTexture.Bounds().Dy()
@@ -636,24 +667,33 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		draw.meshCull[0], draw.meshCull[1], draw.meshCull[2], draw.meshCull[3] = camPos.X, camPos.Y, camPos.Z, facing
 	}
 
-	camera.clearForMeshes(camera.depthIntermediate)
+	depthDst, depthSrc := camera.depthIntermediate, camera.resultDepthTexture
+	meshShader, rigidShader, bendShader, poseShader := camera.depthShaderMesh, camera.depthShaderRigid, camera.depthShaderBend, camera.depthShaderPose
+	if direct {
+		depthDst, depthSrc = camera.resultDepthTexture, nil
+		meshShader, rigidShader, bendShader, poseShader = camera.directDepthMesh, camera.directDepthRigid, camera.directDepthBend, camera.directDepthPose
+	} else {
+		camera.clearForMeshes(camera.depthIntermediate)
+	}
 	opt := &draw.meshDepthOptions
-	opt.Images[0] = camera.resultDepthTexture
+	opt.Images[0] = depthSrc
 	for i := range list {
 		d := &list[i]
 		uniforms(d)
 		opt.Mesh = d.part.gpuMesh
-		shader := camera.depthShaderMesh
+		shader := meshShader
 		if d.model != nil && d.model.GPUBend != nil {
-			shader = camera.depthShaderBend
+			shader = bendShader
 		} else if d.model != nil {
-			shader = camera.depthShaderRigid
+			shader = rigidShader
 		} else if d.pose {
-			shader = camera.depthShaderPose
+			shader = poseShader
 		}
-		camera.depthIntermediate.DrawTrianglesShader32(d.records, nil, shader, opt)
+		depthDst.DrawTrianglesShader32(d.records, nil, shader, opt)
 	}
-	camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
+	if !direct {
+		camera.resultDepthTexture.DrawImage(camera.depthIntermediate, nil)
+	}
 
 	// The colour pass tests the depth with its own hardware depth buffer, so
 	// it takes no depth gate from the last draw of the sorted path.
@@ -678,7 +718,7 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		uniforms(d)
 		draw.setPartUniforms(0, filter, 0, 1, 1)
 		opt.Uniforms = draw.colorUniforms(world, fogless, false)
-		opt.Images[0], opt.Images[1] = img, camera.depthIntermediate
+		opt.Images[0], opt.Images[1] = img, depthDst
 		opt.Mesh = d.part.gpuMesh
 		shader := camera.colorShaderMesh
 		if d.pose {

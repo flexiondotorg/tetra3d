@@ -64,7 +64,9 @@ func TestGPUUniformsMatchProcessorPath(t *testing.T) {
 // way, and checks that the colour and the depth textures agree. The sorted
 // path interpolates the depth linearly across the screen, and the mesh path
 // with the perspective, so the depths agree exactly only on a face that is
-// square to the camera.
+// square to the camera. It also checks that GPUMeshDirectDepth gives the
+// same colour as the mesh path without it, and the same depth to within
+// one step of the encoding.
 func TestRenderMeshesMatchesSortedPath(t *testing.T) {
 	var supported bool
 	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() })
@@ -103,8 +105,10 @@ func TestRenderMeshesMatchesSortedPath(t *testing.T) {
 			SrcX: float32(math.Cos(float64(c.yaw))), SrcY: float32(math.Sin(float64(c.yaw))),
 			Custom0: scale, ColorR: 1, ColorG: 1, ColorB: 1,
 		}}}}
-		read := func(onMeshPath bool) (colour, depth []byte, draws, instances int) {
+		read := func(onMeshPath, direct bool) (colour, depth []byte, draws, instances int) {
 			colour, depth = make([]byte, 4*64*64), make([]byte, 4*64*64)
+			cam.GPUMeshDirectDepth = direct
+			defer func() { cam.GPUMeshDirectDepth = false }()
 			inFrame(t, func() {
 				cam.Clear()
 				model.SetVisible(!onMeshPath, false)
@@ -118,8 +122,22 @@ func TestRenderMeshesMatchesSortedPath(t *testing.T) {
 			})
 			return
 		}
-		sortedColour, sortedDepth, _, _ := read(false)
-		meshColour, meshDepth, draws, instances := read(true)
+		sortedColour, sortedDepth, _, _ := read(false, false)
+		meshColour, meshDepth, draws, instances := read(true, false)
+		// With GPUMeshDirectDepth, the depth pass draws into the depth
+		// texture itself, which holds no hardware depth before it.
+		directColour, directDepth, _, _ := read(true, true)
+		// The depth shader differs, so its encoding can round the last byte
+		// the other way.
+		if !slices.Equal(directColour, meshColour) {
+			t.Errorf("%s: GPUMeshDirectDepth changes the colour texture", c.name)
+		}
+		for i := 0; i < len(meshDepth); i += 4 {
+			if d := metres(directDepth[i:i+4]) - metres(meshDepth[i:i+4]); math.Abs(d) > 1.5*spread/depthUnits || directDepth[i+3] != meshDepth[i+3] {
+				t.Errorf("%s: GPUMeshDirectDepth changes the depth at pixel %d from %v to %v", c.name, i/4, meshDepth[i:i+4], directDepth[i:i+4])
+				break
+			}
+		}
 		if draws != 2 || instances != 1 {
 			t.Errorf("%s: %d mesh draws and %d instances, want 2 and 1", c.name, draws, instances)
 		}
@@ -147,6 +165,23 @@ func TestRenderMeshesMatchesSortedPath(t *testing.T) {
 		}
 		if colourDiff > covered/20 || depthDiff > covered/20 {
 			t.Errorf("%s: %d colour and %d depth pixels differ of %d covered, want at most %d", c.name, colourDiff, depthDiff, covered, covered/20)
+		}
+	}
+}
+
+// TestGPUClipPlanes checks that the clip planes of GPUMeshDirectDepth give
+// a z/w of 0 at the near plane, 1 at the far plane, and
+// far/(far-near) * (1-near/d) between them.
+func TestGPUClipPlanes(t *testing.T) {
+	const near, far = 0.3, 1000
+	proj := NewProjectionMatrix4Perspective(60, near, far, 320, 200)
+	c := newGPUClipPlanes(proj, near, far)
+	for _, d := range []float32{near, 1, 10, 100, far} {
+		w := -d * proj[2][3]
+		z := c.k * (w - c.near)
+		want := float32(far / (far - near) * (1 - near/float64(d)))
+		if got := z / w; math.Abs(float64(got-want)) > 1e-6 {
+			t.Errorf("at %v m, z/w is %v, want %v", d, got, want)
 		}
 	}
 }
