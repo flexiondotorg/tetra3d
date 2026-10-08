@@ -465,10 +465,10 @@ func NewCamera(name string, w, h int) *Camera {
 			p0 := mod(srcPos - 1/2.0, imageSrc1Size())
 			p1 := mod(srcPos + 1/2.0, imageSrc1Size())
 
-			c0 := imageSrc1UnsafeAt(p0)
-			c1 := imageSrc1UnsafeAt(vec2(p1.x, p0.y))
-			c2 := imageSrc1UnsafeAt(vec2(p0.x, p1.y))
-			c3 := imageSrc1UnsafeAt(p1)
+			c0 := imageSrc1UnsafeAtFromSrc0Pos(p0)
+			c1 := imageSrc1UnsafeAtFromSrc0Pos(vec2(p1.x, p0.y))
+			c2 := imageSrc1UnsafeAtFromSrc0Pos(vec2(p0.x, p1.y))
+			c3 := imageSrc1UnsafeAtFromSrc0Pos(p1)
 
 			rate := fract(p1)
 
@@ -481,7 +481,7 @@ func NewCamera(name string, w, h int) *Camera {
 		}
 
 		func nearestFilter(srcPos vec2) vec4 {
-			return imageSrc1UnsafeAt(srcPos)
+			return imageSrc1UnsafeAtFromSrc0Pos(srcPos)
 		}
 
 		func Fragment(dstPos vec4, srcPos vec2, vc, custom vec4) vec4 {
@@ -598,7 +598,7 @@ func NewCamera(name string, w, h int) *Camera {
 
 		func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 
-			resultDepth := imageSrc1UnsafeAt(dstPosToSrcPos(dstPos.xy))
+			resultDepth := imageSrc1UnsafeAtFromSrc0Pos(dstPosToSrcPos(dstPos.xy))
 
 			if resultDepth.a == 0 || decodeDepth(resultDepth) > SpriteDepth {
 				return imageSrc0UnsafeAt(srcPos)
