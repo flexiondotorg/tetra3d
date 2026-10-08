@@ -26,7 +26,7 @@ func dstPosToSrcPos(dstPos vec2) vec2 {
 
 func Fragment(dstPos vec4, srcPos vec2) vec4 {
 
-	depthTex := imageSrc1UnsafeAt(dstPosToSrcPos(dstPos.xy))
+	depthTex := imageSrc1UnsafeAtFromSrc0Pos(dstPosToSrcPos(dstPos.xy))
 	
 	if depthTex.a > 0 {
 
