@@ -562,25 +562,25 @@ func NewCamera(name string, w, h int) *Camera {
 	if cam.clearShaderDepth, err = ebiten.NewShader(clearDepthShaderSource); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(base3DShaderSource(""))); err != nil {
+	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 	if cam.depthShaderRigid, err = ebiten.NewShader(withGPURigid(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderRigid, err = ebiten.NewShader(withGPURigid(base3DShaderSource(""))); err != nil {
+	if cam.colorShaderRigid, err = ebiten.NewShader(withGPURigid(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 	if cam.depthShaderBend, err = ebiten.NewShader(withGPUBend(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderBend, err = ebiten.NewShader(withGPUBend(base3DShaderSource(""))); err != nil {
+	if cam.colorShaderBend, err = ebiten.NewShader(withGPUBend(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 	if cam.depthShaderPose, err = ebiten.NewShader(withGPUPose(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderPose, err = ebiten.NewShader(withGPUPose(base3DShaderSource(""))); err != nil {
+	if cam.colorShaderPose, err = ebiten.NewShader(withGPUPose(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 	if cam.depthShaderSorted, err = ebiten.NewShader(withSortedVertex(depthShaderText)); err != nil {
