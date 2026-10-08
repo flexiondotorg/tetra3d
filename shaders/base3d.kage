@@ -79,7 +79,7 @@ func Fragment(dstPos vec4, srcPos vec2, vc, custom vec4) vec4 {
 
 	color := vc
 
-	depth := imageSrc1UnsafeAt(dstPosToSrcPos(dstPos.xy))
+	depth := imageSrc1UnsafeAtFromSrc0Pos(dstPosToSrcPos(dstPos.xy))
 	
 	if depth.a > 0 && (DepthGate <= 0 || abs(decodeDepth(depth) - custom.y) <= DepthGate) {
 
