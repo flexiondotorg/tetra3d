@@ -440,7 +440,7 @@ func (text *Text) SetStyle(style TextStyle) {
 			uniformMap["ShadowColorFarSet"] = 1.0
 		}
 
-		text.meshPart.Material.FragmentShaderOptions = &ebiten.DrawTrianglesShaderOptions{
+		text.meshPart.Material.FragmentShaderOptions = &FragmentShaderOptions{
 			Images: [4]*ebiten.Image{
 				text.Texture,
 			},

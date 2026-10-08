@@ -27,6 +27,10 @@ type drawScratch struct {
 	depthOptions       ebiten.DrawTrianglesShaderOptions
 	clipOptions        ebiten.DrawTrianglesShaderOptions
 
+	// fragmentOptions holds the Ebitengine options that Camera.Render builds
+	// from Material.FragmentShaderOptions when RenderDepth is off.
+	fragmentOptions ebiten.DrawTrianglesShaderOptions
+
 	// worldUniforms is for a scene with a World, plainUniforms for a scene
 	// without one, clipUniforms for the alpha-clip depth pass, and
 	// fragmentUniforms for the colour pass of a material with its own
