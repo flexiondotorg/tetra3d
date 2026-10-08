@@ -54,3 +54,15 @@ func (s *drawScratch) setGPUUniforms(mvp *Matrix4, clip gpuClip, camWidth, camHe
 	s.gpuTint[0], s.gpuTint[1], s.gpuTint[2], s.gpuTint[3] = tint.R, tint.G, tint.B, tint.A
 	s.gpuTexSize[0], s.gpuTexSize[1] = srcW, srcH
 }
+
+// newGPUClipPlanes returns the clip planes of a perspective camera at its
+// exact near and far planes, see Camera.GPUMeshDirectDepth: the clip z is 0
+// at the near plane and w at the far plane, so z/w is
+// far/(far-near) * (1-near/d) at a distance d along the view.
+func newGPUClipPlanes(proj Matrix4, near, far float32) gpuClip {
+	// The w is -zv * proj[2][3] for a view-space z of zv, and the distance
+	// along the view is -zv.
+	c := gpuClip{near: -near * proj[2][3], far: -far * proj[2][3]}
+	c.k = c.far / (c.far - c.near)
+	return c
+}

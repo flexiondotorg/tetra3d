@@ -14,6 +14,11 @@ import "bytes"
 // is the same for every part at a pixel: where the depth pass kept no part,
 // every part returns transparent, and where it kept a part, no part returns
 // transparent. So that depth hides no fragment that must show.
+//
+// The gate takes a depth only where its alpha is 1. depthIntermediate has
+// an alpha of 0 or 1, and with Camera.GPUMeshDirectDepth, the depth texture
+// has an alpha of 1 only where the depth pass kept a part.
 func meshColour(src []byte) []byte {
+	src = bytes.Replace(src, []byte("if depth.a > 0 &&"), []byte("if depth.a > 0.998 &&"), 1)
 	return bytes.Replace(src, []byte("\n\tdiscard()\n\n}\n"), []byte("\n\treturn vec4(0)\n\n}\n"), 1)
 }
