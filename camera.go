@@ -253,6 +253,16 @@ const (
 	AccumulationColorModeSingleLastFrame                              // Accumulation buffer is on and renders just the previous frame's ColorTexture result
 )
 
+// AccumulationDrawOptions holds the options that a Camera uses to draw frames to the accumulation buffer.
+// The fields match the fields of the same name in ebiten.DrawImageOptions.
+type AccumulationDrawOptions struct {
+	GeoM           ebiten.GeoM       // Geometry transformation of the draw.
+	ColorScale     ebiten.ColorScale // Color scale of the draw; use this to fade out or color previous frames.
+	Blend          ebiten.Blend      // Blend mode of the draw.
+	Filter         ebiten.Filter     // Filter of the draw.
+	DisableMipmaps bool              // Whether the draw uses no mipmaps.
+}
+
 // Camera represents a camera (where you look from) in Tetra3D.
 type Camera struct {
 	*Node
@@ -284,7 +294,8 @@ type Camera struct {
 	AccumulationColorMode AccumulationColorMode
 	// Draw image options to use when rendering frames to the accumulation buffer; use this to fade out or color previous frames.
 	// This should probably be set once, or once per frame before rendering; otherwise, the effects compound and it's impossible to see the result.
-	AccumulationDrawOptions *ebiten.DrawImageOptions
+	AccumulationDrawOptions *AccumulationDrawOptions
+	accumulationOptions     ebiten.DrawImageOptions // The Ebitengine options that ClearWithColor builds from AccumulationDrawOptions.
 
 	near, far   float32 // The near and far clipping plane. Near defaults to 0.1, Far to 100 (unless these settings are loaded from a camera in a GLTF file).
 	perspective bool    // If the Camera has a perspective projection. If not, it would be orthographic
@@ -1105,15 +1116,20 @@ func (camera *Camera) ClearWithColor(clear Color4) {
 		camera.accumulatedBackBuffer.Clear()
 		camera.accumulatedBackBuffer.DrawImage(camera.resultAccumulatedColorTexture, nil)
 		camera.resultAccumulatedColorTexture.Clear()
+		var accumulationOptions *ebiten.DrawImageOptions
+		if o := camera.AccumulationDrawOptions; o != nil {
+			accumulationOptions = &camera.accumulationOptions
+			*accumulationOptions = ebiten.DrawImageOptions{GeoM: o.GeoM, ColorScale: o.ColorScale, Blend: o.Blend, Filter: o.Filter, DisableMipmaps: o.DisableMipmaps}
+		}
 		switch camera.AccumulationColorMode {
 		case AccumulationColorModeBelow:
-			camera.resultAccumulatedColorTexture.DrawImage(camera.accumulatedBackBuffer, camera.AccumulationDrawOptions)
+			camera.resultAccumulatedColorTexture.DrawImage(camera.accumulatedBackBuffer, accumulationOptions)
 			camera.resultAccumulatedColorTexture.DrawImage(camera.resultColorTexture, nil)
 		case AccumulationColorModeAbove:
 			camera.resultAccumulatedColorTexture.DrawImage(camera.resultColorTexture, nil)
-			camera.resultAccumulatedColorTexture.DrawImage(camera.accumulatedBackBuffer, camera.AccumulationDrawOptions)
+			camera.resultAccumulatedColorTexture.DrawImage(camera.accumulatedBackBuffer, accumulationOptions)
 		case AccumulationColorModeSingleLastFrame:
-			camera.resultAccumulatedColorTexture.DrawImage(camera.resultColorTexture, camera.AccumulationDrawOptions)
+			camera.resultAccumulatedColorTexture.DrawImage(camera.resultColorTexture, accumulationOptions)
 		}
 	}
 
@@ -2221,7 +2237,12 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 			if hasFragShader {
 				// TODO: Review usage of FragmentShaderOptions here.
-				camera.resultColorTexture.DrawTrianglesShader(verts, indices, mat.fragmentShader, mat.FragmentShaderOptions)
+				var fragmentOptions *ebiten.DrawTrianglesShaderOptions
+				if o := mat.FragmentShaderOptions; o != nil {
+					fragmentOptions = &draw.fragmentOptions
+					*fragmentOptions = ebiten.DrawTrianglesShaderOptions{Uniforms: o.Uniforms, Images: o.Images, Blend: o.Blend}
+				}
+				camera.resultColorTexture.DrawTrianglesShader(verts, indices, mat.fragmentShader, fragmentOptions)
 			} else {
 				camera.resultColorTexture.DrawTriangles(verts, indices, img, colorPassOptions)
 			}
