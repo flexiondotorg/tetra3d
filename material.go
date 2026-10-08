@@ -246,7 +246,7 @@ func (m *Material) SetName(name string) {
 func (m *Material) SetShaderText(src []byte) (*ebiten.Shader, error) {
 
 	if m.fragmentShader != nil {
-		m.fragmentShader.Dispose()
+		m.fragmentShader.Deallocate()
 		m.fragmentShader = nil
 	}
 
@@ -294,7 +294,7 @@ func (m *Material) Shader() *ebiten.Shader {
 // DisposeShader disposes the custom fragment Shader for the Material (assuming it has one). If it does not have a Shader, nothing happens.
 func (m *Material) DisposeShader() {
 	if m.fragmentShader != nil {
-		m.fragmentShader.Dispose()
+		m.fragmentShader.Deallocate()
 	}
 	m.fragmentSrc = nil
 	m.fragmentShader = nil
