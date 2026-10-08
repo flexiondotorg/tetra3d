@@ -64,6 +64,13 @@ const (
 
 type CustomMaterialDepthFunction func(model *Model, camera *Camera, meshPart *MeshPart, vertIndex int, originalDepth float32) float32
 
+// FragmentShaderOptions holds the uniforms, images, and blend mode that a Material passes to its custom fragment shader.
+type FragmentShaderOptions struct {
+	Uniforms map[string]any   // Uniforms of the fragment shader, by name.
+	Images   [4]*ebiten.Image // Source images of the fragment shader.
+	Blend    ebiten.Blend     // Blend mode of the draw of the fragment shader.
+}
+
 type Material struct {
 	id                uint32
 	library           *Library       // library is a reference to the Library that this Material came from.
@@ -104,13 +111,13 @@ type Material struct {
 	// FragmentShaderOn is an easy boolean toggle to control whether the shader is activated or not (it defaults to on).
 	FragmentShaderOn bool
 	// FragmentShaderOptions allows you to customize the custom fragment shader with uniforms or images.
-	// By default, it's an empty DrawTrianglesShaderOptions struct.
+	// By default, it's an empty FragmentShaderOptions struct.
 	// Note that the first image slot is reserved for the color texture associated with the Material.
 	// The second slot is reserved for a depth texture (primarily the intermediate texture used to "cut" a
 	// rendered model).
 	// If you want a custom fragment shader that already has fog and depth-testing, use Extend3DBaseShader() to
 	// extend your custom fragment shader from Tetra3D's base 3D shader.
-	FragmentShaderOptions *ebiten.DrawTrianglesShaderOptions
+	FragmentShaderOptions *FragmentShaderOptions
 	fragmentSrc           []byte
 
 	// If a material is tagged as transparent, it's rendered in a separate render pass.
@@ -157,7 +164,7 @@ func NewMaterial(name string) *Material {
 		UseTexture:                      true,
 		TriangleSortMode:                TriangleSortModeBackToFront,
 		TransparencyMode:                TransparencyModeAuto,
-		FragmentShaderOptions:           &ebiten.DrawTrianglesShaderOptions{},
+		FragmentShaderOptions:           &FragmentShaderOptions{},
 		FragmentShaderOn:                true,
 		Blend:                           ebiten.BlendSourceOver,
 		Visible:                         true,
