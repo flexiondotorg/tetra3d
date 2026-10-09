@@ -1121,6 +1121,9 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 			triCenters = mesh.triCenters[triStart:triEnd]
 		}
 
+		// A part that draws its triangles unsorted needs no depth for them.
+		sorted := globalSortingTriangleBucket.sortMode != TriangleSortModeNone
+
 		for i := range triCenters {
 
 			a, b, c := triVertexIndices[3*i], triVertexIndices[3*i+1], triVertexIndices[3*i+2]
@@ -1150,6 +1153,12 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 
 				}
 
+			}
+
+			if !sorted {
+				globalSortingTriangleBucket.AddTriangle(triStart+i, 0)
+				vertexListIndex += 3
+				continue
 			}
 
 			var depth float32
