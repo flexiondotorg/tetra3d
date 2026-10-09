@@ -95,6 +95,13 @@ func ExtendBase3DShader(customFragment string) (*ebiten.Shader, error) {
 	if bend, err := ebiten.NewShader(withGPUBend(meshColour(base3DShaderSource(customFragment)))); err == nil {
 		bendShaders[shader] = bend
 	}
+	// The variants for Camera.GPUMeshOnePass.
+	if rigid, err := ebiten.NewShader(withGPURigid(meshColourOnePass(base3DShaderSource(customFragment)))); err == nil {
+		onePassRigidShaders[shader] = rigid
+	}
+	if bend, err := ebiten.NewShader(withGPUBend(meshColourOnePass(base3DShaderSource(customFragment)))); err == nil {
+		onePassBendShaders[shader] = bend
+	}
 	// The variant for the depth test inside a part, see Camera.DepthInParts.
 	if sorted, err := ebiten.NewShader(withSortedVertex(base3DShaderSource(customFragment))); err == nil {
 		sortedShaders[shader] = sorted

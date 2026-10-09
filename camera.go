@@ -342,6 +342,35 @@ type Camera struct {
 	// caller must not write an alpha of 1. Defaults to false.
 	GPUMeshDirectDepth bool
 
+	// GPUMeshOnePass draws the mesh path in Render with no depth pass: each
+	// part draws its colour once, with the hardware depth test of the colour
+	// texture and no gate, then AfterMeshColour runs, and then the depth
+	// texture takes the hardware depth of the colour texture, in the
+	// encoding of the camera with an alpha of 1, or transparent black where
+	// nothing drew. Then the sorted path draws as before. It needs a
+	// perspective camera and a graphics driver where
+	// ebiten.IsDepthSourceSupported is true, and it puts the clip z at the
+	// exact near and far planes, as GPUMeshDirectDepth does.
+	//
+	// Only the hardware depth of the colour texture hides a part, and the
+	// depth texture then holds that depth alone. So a caller with surfaces of
+	// its own draws their depth into ColorTexture with the hardware depth
+	// test and the clip z of GPUMeshDirectDepth: before Render, as the first
+	// depth draw of the colour texture in the frame, to hide the parts behind
+	// them, or in AfterMeshColour, to skip the pixels of nearer parts. When
+	// Render has no part for the mesh path, the depth texture stays as the
+	// caller drew it. RenderMeshes draws as without GPUMeshOnePass. Defaults
+	// to false.
+	GPUMeshOnePass bool
+
+	// AfterMeshColour, when not nil, runs inside Render with GPUMeshOnePass,
+	// after the colour pass of the mesh path and before the depth texture
+	// takes its depth, also when the mesh path draws nothing. A caller can
+	// draw into ColorTexture there with the hardware depth test against the
+	// mesh parts. Set it once, not in each frame, as a new closure
+	// allocates. Defaults to nil.
+	AfterMeshColour func()
+
 	DebugInfo *DebugInfo
 
 	depthShader     *ebiten.Shader
@@ -361,6 +390,12 @@ type Camera struct {
 	// The depth shaders of the mesh path for GPUMeshDirectDepth, see
 	// directDepthShaderSource.
 	directDepthMesh, directDepthRigid, directDepthBend, directDepthPose *ebiten.Shader
+
+	// The colour shaders of the mesh path for GPUMeshOnePass, with no gate,
+	// see meshColourOnePass, and the shader of the depth resolve, see
+	// resolveDepthShaderSource.
+	onePassMesh, onePassRigid, onePassBend, onePassPose *ebiten.Shader
+	resolveDepthShader                                  *ebiten.Shader
 
 	// The depth and colour shaders of the depth test inside a part, see
 	// sortedVertexSource.
@@ -617,6 +652,21 @@ func NewCamera(name string, w, h int) *Camera {
 		panic(err)
 	}
 	if cam.directDepthPose, err = ebiten.NewShader(withGPUPose(directDepthShaderSource)); err != nil {
+		panic(err)
+	}
+	if cam.onePassMesh, err = ebiten.NewShader(withGPUMesh(meshColourOnePass(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.onePassRigid, err = ebiten.NewShader(withGPURigid(meshColourOnePass(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.onePassBend, err = ebiten.NewShader(withGPUBend(meshColourOnePass(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.onePassPose, err = ebiten.NewShader(withGPUPose(meshColourOnePass(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.resolveDepthShader, err = ebiten.NewShader(resolveDepthShaderSource); err != nil {
 		panic(err)
 	}
 	if cam.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
@@ -2373,7 +2423,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	// The mesh path draws first, so that the sorted path compares against its
 	// depth.
 	draw.groupRigid(camera)
-	camera.drawMeshes(scene, draw.meshDraws)
+	camera.drawMeshes(scene, draw.meshDraws, camera.GPUMeshOnePass && camera.perspective)
 	clear(draw.meshDraws)
 	draw.queued = 0
 

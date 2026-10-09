@@ -15,3 +15,5 @@ This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the
 5. T4: the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer) and the depth test inside the parts of the sorted path.
 
 T0 to T3 build against stock Ebitengine. T4 needs the Ebitengine fork [`flexiondotorg/ebiten`](https://github.com/flexiondotorg/ebiten), branch `fivehorizons`, so `go.mod` has a `replace` line for it from the first T4 patch. The patches of T0 to T2 are offered upstream one at a time.
+
+T46, the one pass of the mesh path (`Camera.GPUMeshOnePass` and `Camera.AfterMeshColour`), is a T4 patch: the parts draw their colour once with no depth pass, and a full-screen draw resolves the hardware depth of the colour texture into the depth texture. It needs `DrawTrianglesShaderOptions.SourceDepth` and `ebiten.IsDepthSourceSupported` of the Ebitengine fork.

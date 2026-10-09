@@ -5,8 +5,8 @@ github.com/ebitengine/hideconsole v1.0.0 h1:5J4U0kXF+pv/DhiXt5/lTz0eO5ogJ1iXb8Yj
 github.com/ebitengine/hideconsole v1.0.0/go.mod h1:hTTBTvVYWKBuxPr7peweneWdkUwEuHuB3C1R/ielR1A=
 github.com/ebitengine/purego v0.11.1 h1:2zpWRSQNVKN4eKsKO9eM1ILDgWfYMY9GwqRmK6XeQ/0=
 github.com/ebitengine/purego v0.11.1/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
-github.com/flexiondotorg/ebiten/v2 v2.0.0-20261006021447-938520fcbc59 h1:UAVuVbTMtBF7jSLGRGi4MDe2DuVT5CHTU3Ap2k6jvPI=
-github.com/flexiondotorg/ebiten/v2 v2.0.0-20261006021447-938520fcbc59/go.mod h1:aRrEMRro03bHvrPXJdJiaW9uJxA3sNInqLP/SzeLaM4=
+github.com/flexiondotorg/ebiten/v2 v2.0.0-20261009013854-42a6880e0aeb h1:qYeofT+eYtzoMWIqo7/RsSUkY5GMezHzyNS+e+zgvHQ=
+github.com/flexiondotorg/ebiten/v2 v2.0.0-20261009013854-42a6880e0aeb/go.mod h1:aRrEMRro03bHvrPXJdJiaW9uJxA3sNInqLP/SzeLaM4=
 github.com/go-test/deep v1.0.1 h1:UQhStjbkDClarlmv0am7OXXO4/GaPdCGiUiMTvi28sg=
 github.com/go-test/deep v1.0.1/go.mod h1:wGDj63lr65AM2AQyKZd/NYHGb0R+1RLqB8NKt3aSFNA=
 github.com/go-text/typesetting v0.3.5 h1:XZPUooClHY0Vf/rFyUyuPRNEkawARaFzLMQcXLSEyPk=

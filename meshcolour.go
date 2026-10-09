@@ -22,3 +22,14 @@ func meshColour(src []byte) []byte {
 	src = bytes.Replace(src, []byte("if depth.a > 0 &&"), []byte("if depth.a > 0.998 &&"), 1)
 	return bytes.Replace(src, []byte("\n\tdiscard()\n\n}\n"), []byte("\n\treturn vec4(0)\n\n}\n"), 1)
 }
+
+// meshColourOnePass returns the base 3D shader source src for the colour
+// pass of the mesh path with Camera.GPUMeshOnePass: meshColour with no gate.
+// The hardware depth test of the colour texture alone keeps the nearest
+// part, so the shader reads no depth image, and the fog takes the depth of
+// the fragment itself, which is the depth that the depth pass would keep.
+func meshColourOnePass(src []byte) []byte {
+	src = meshColour(src)
+	src = bytes.Replace(src, []byte("depth := imageSrc1UnsafeAtFromSrc0Pos(dstPosToSrcPos(dstPos.xy))"), []byte("depth := vec4(1)"), 1)
+	return bytes.ReplaceAll(src, []byte("decodeDepth(depth)"), []byte("custom.y"))
+}

@@ -69,6 +69,11 @@ type drawScratch struct {
 	clearVertices [4]ebiten.Vertex
 	clearOptions  ebiten.DrawTrianglesShaderOptions
 
+	// The quad, the uniforms, and the options of Camera.resolveDepth.
+	resolveVertices           [4]ebiten.Vertex
+	resolveClip, resolveDepth []float32
+	resolveOptions            ebiten.DrawTrianglesShaderOptions
+
 	// foglessValue holds fogless. foglessNormal is the value of Fogless in a
 	// normal render, an int like the literal 1 that it stands for.
 	foglessValue, foglessNormal any
@@ -154,6 +159,12 @@ func newDrawScratch() *drawScratch {
 	s.meshDepthOptions.Uniforms = gpu
 	s.meshDepthOptions.Depth = true
 	s.meshColorOptions.Depth = true
+	s.resolveClip, s.resolveDepth = make([]float32, 4), make([]float32, 2)
+	s.resolveOptions = ebiten.DrawTrianglesShaderOptions{
+		Uniforms:    map[string]any{"ResolveClip": s.resolveClip, "ResolveDepth": s.resolveDepth},
+		Blend:       ebiten.BlendCopy,
+		SourceDepth: true,
+	}
 	return s
 }
 

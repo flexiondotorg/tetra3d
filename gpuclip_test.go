@@ -185,3 +185,87 @@ func TestGPUClipPlanes(t *testing.T) {
 		}
 	}
 }
+
+// TestGPUMeshOnePass draws a red cube in front of a green one as models on
+// the mesh path, with fog, once with GPUMeshDirectDepth and once with
+// GPUMeshOnePass. It checks that the colour textures match, that the
+// resolved depth texture matches the depth pass to within 1 mm, with the
+// same alpha, and that AfterMeshColour runs once.
+func TestGPUMeshOnePass(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() && ebiten.IsDepthSourceSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes or read a depth buffer")
+	}
+	scene := NewScene("one pass")
+	scene.World.LightingOn = false
+	scene.World.FogMode = FogOverwrite
+	scene.World.FogColor = NewColor4(0.2, 0.4, 0.8, 1)
+	scene.World.FogRange = []float32{0, 0.1}
+	cube := func(x, z float32, c Color4) *Model {
+		m := NewModel("cube", NewCubeMesh(2, 2, 2))
+		m.mesh.MeshParts[0].Material.Color = c
+		m.mesh.MeshParts[0].Material.Shadeless = true
+		m.SetLocalPosition(x, 0, z)
+		m.SetLocalRotation(NewMatrix4Rotate(0, 1, 0, 0.4))
+		return m
+	}
+	near := cube(0, -6, NewColor4(1, 0, 0, 1))
+	far := cube(1.2, -9, NewColor4(0, 1, 0, 1))
+	cam := NewCamera("camera", 64, 64)
+	cam.GPUMesh = true
+	scene.Root.AddChildren(cam, near, far)
+	inFrame(t, func() {
+		near.mesh.BuildGPUMesh()
+		far.mesh.BuildGPUMesh()
+	})
+	spread := float64(cam.far-cam.near) * float64(1+2*cam.DepthMargin)
+	metres := func(p []byte) float64 {
+		return (float64(p[0])*65025 + float64(p[1])*255 + float64(p[2])) / depthUnits * spread
+	}
+
+	hooked := 0
+	cam.AfterMeshColour = func() { hooked++ }
+	read := func(onePass bool) (colour, depth []byte) {
+		colour, depth = make([]byte, 4*64*64), make([]byte, 4*64*64)
+		cam.GPUMeshDirectDepth, cam.GPUMeshOnePass = !onePass, onePass
+		inFrame(t, func() {
+			cam.Clear()
+			cam.RenderScene(scene)
+			cam.ColorTexture().ReadPixels(colour)
+			cam.DepthTexture().ReadPixels(depth)
+		})
+		return
+	}
+	directColour, directDepth := read(false)
+	if hooked != 0 {
+		t.Errorf("AfterMeshColour ran %d times without GPUMeshOnePass, want 0", hooked)
+	}
+	oneColour, oneDepth := read(true)
+	if hooked != 1 {
+		t.Errorf("AfterMeshColour ran %d times with GPUMeshOnePass, want 1", hooked)
+	}
+
+	drawn, colourDiff, depthDiff, maxDiff := 0, 0, 0, 0.0
+	for i := 0; i < len(directColour); i += 4 {
+		if directDepth[i+3] != 0 {
+			drawn++
+		}
+		for ch := range 4 {
+			if d := int(directColour[i+ch]) - int(oneColour[i+ch]); d < -2 || d > 2 {
+				colourDiff++
+				break
+			}
+		}
+		maxDiff = max(maxDiff, math.Abs(metres(oneDepth[i:i+4])-metres(directDepth[i:i+4])))
+		if oneDepth[i+3] != directDepth[i+3] || math.Abs(metres(oneDepth[i:i+4])-metres(directDepth[i:i+4])) > 0.001 {
+			depthDiff++
+		}
+	}
+	if drawn < 400 {
+		t.Fatalf("the cubes cover %d pixels, want at least 400", drawn)
+	}
+	if colourDiff > 0 || depthDiff > 0 {
+		t.Errorf("%d colour and %d depth pixels differ of %d drawn, want 0, with a depth difference of up to %.4f m", colourDiff, depthDiff, drawn, maxDiff)
+	}
+}
