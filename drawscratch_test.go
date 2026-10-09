@@ -11,14 +11,15 @@ import (
 
 // uniformBits converts each uniform value to its dwords in the way that
 // Ebitengine's ui.Shader.AppendUniforms does, for the kinds that the colour
-// and depth passes use. It leaves out the uniforms of the mesh path and the
-// depth test inside parts, which the stock shaders of the CPU transform do
-// not have.
+// and depth passes use. It leaves out the uniforms of the mesh path, the
+// depth test inside parts, and HardwareDepth, which the stock shaders of the
+// CPU transform do not have.
 func uniformBits(t *testing.T, m map[string]any) map[string][]uint32 {
 	t.Helper()
 	out := map[string][]uint32{}
 	for name, value := range m {
-		if strings.HasPrefix(name, "GPUVertex") || strings.HasPrefix(name, "GPUMesh") || strings.HasPrefix(name, "GPUBend") || name == "SortedClip" || name == "DepthGate" {
+		if strings.HasPrefix(name, "GPUVertex") || strings.HasPrefix(name, "GPUMesh") || strings.HasPrefix(name, "GPUBend") || name == "SortedClip" || name == "DepthGate" ||
+			strings.HasPrefix(name, "Hardware") || name == "AlphaClip" {
 			continue
 		}
 		v := reflect.ValueOf(value)

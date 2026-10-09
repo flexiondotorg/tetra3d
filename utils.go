@@ -106,6 +106,10 @@ func ExtendBase3DShader(customFragment string) (*ebiten.Shader, error) {
 	if sorted, err := ebiten.NewShader(withSortedVertex(base3DShaderSource(customFragment))); err == nil {
 		sortedShaders[shader] = sorted
 	}
+	// The variant for the sorted path with Camera.HardwareDepth.
+	if hardware, err := ebiten.NewShader(withHardwareVertex(hardwareColour(base3DShaderSource(customFragment)))); err == nil {
+		hardwareShaders[shader] = hardware
+	}
 	return shader, nil
 }
 

@@ -284,7 +284,8 @@ var rigidShaders = map[*ebiten.Shader]*ebiten.Shader{}
 var bendShaders = map[*ebiten.Shader]*ebiten.Shader{}
 
 // onePassRigidShaders and onePassBendShaders hold the variants of
-// rigidShaders and bendShaders for Camera.GPUMeshOnePass.
+// rigidShaders and bendShaders for Camera.GPUMeshOnePass and
+// Camera.HardwareDepth.
 var onePassRigidShaders, onePassBendShaders = map[*ebiten.Shader]*ebiten.Shader{}, map[*ebiten.Shader]*ebiten.Shader{}
 
 // rigidRecord returns the instance record of gpuRigidSource for model, with
@@ -414,7 +415,7 @@ func (camera *Camera) gpuMeshPart(model *Model, part *MeshPart, lighting bool) b
 // rigidVariants returns the variants of the fragment shaders of materials
 // that the colour pass of the mesh path draws model with.
 func (camera *Camera) rigidVariants(model *Model) map[*ebiten.Shader]*ebiten.Shader {
-	onePass := camera.GPUMeshOnePass && camera.perspective
+	onePass := camera.onePass()
 	switch {
 	case model.GPUBend != nil && onePass:
 		return onePassBendShaders
@@ -609,7 +610,7 @@ func Fragment(dstPos vec4, srcPos vec2, color, custom vec4) vec4 {
 
 // resolveDepthShaderSource is the depth resolve of Camera.GPUMeshOnePass. It
 // reads the hardware depth of the colour texture as image 0, see
-// ebiten.DrawTrianglesShaderOptions.SourceDepth, and writes the depth in the
+// ebiten.DrawTrianglesShaderOptions.ImageDepth, and writes the depth in the
 // encoding of the depth texture with an alpha of 1, or transparent black at
 // the far plane, where nothing drew. ResolveClip turns the hardware depth z
 // into the z/w of newGPUClipPlanes, q = z*x + y, and holds the near plane
@@ -642,9 +643,9 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 
 // resolveDepth draws the hardware depth of the colour texture into the depth
 // texture, see resolveDepthShaderSource, for the projection proj and the
-// depth encoding of drawMeshes. OpenGL, the only graphics library that
-// ebiten.IsDepthSourceSupported allows, maps a z/w from -1 to 1 to a depth
-// from 0 to 1. It does not allocate.
+// depth encoding of drawMeshes. The hardware depth is the z/w of the clip
+// position on every graphics library, from 0 at z = 0 to 1 at z = w. It does
+// not allocate.
 func (camera *Camera) resolveDepth(proj Matrix4, margin, spread float32) {
 	draw := camera.draw
 	src := camera.resultColorTexture
@@ -654,7 +655,7 @@ func (camera *Camera) resolveDepth(proj Matrix4, margin, spread float32) {
 	v[2].DstY, v[2].SrcY = h, h
 	v[3].DstX, v[3].SrcX, v[3].DstY, v[3].SrcY = w, w, h, h
 	c, d := draw.resolveClip, draw.resolveDepth
-	c[0], c[1], c[2], c[3] = 2, -1, camera.near, (camera.far-camera.near)/camera.far
+	c[0], c[1], c[2], c[3] = 1, 0, camera.near, (camera.far-camera.near)/camera.far
 	// The clip z of a point at the distance d along the view is
 	// -d*proj[2][2] + proj[3][2], see newGPUClip.
 	d[0], d[1] = -proj[2][2]/spread, (proj[3][2]+margin)/spread
@@ -702,7 +703,7 @@ var clearIndices = [6]uint32{0, 1, 2, 1, 3, 2}
 // colour pass draws each part with the shaders that have no gate, then
 // Camera.AfterMeshColour runs, also when the list is empty, and then
 // resolveDepth gives the depth texture the depth of the colour texture,
-// unless the list is empty.
+// unless the list is empty or Camera.HardwareDepth is on.
 func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw, onePass bool) {
 	if len(list) == 0 {
 		if onePass && camera.AfterMeshColour != nil {
@@ -852,6 +853,19 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw, onePass bool) {
 		if camera.AfterMeshColour != nil {
 			camera.AfterMeshColour()
 		}
-		camera.resolveDepth(camera.Projection(), margin, spread)
+		if !camera.hardwareDepth() {
+			camera.resolveDepth(camera.Projection(), margin, spread)
+		}
 	}
+}
+
+// hardwareDepth reports whether Render draws with Camera.HardwareDepth.
+func (camera *Camera) hardwareDepth() bool {
+	return camera.HardwareDepth && camera.perspective && camera.RenderDepth && !camera.RenderNormals
+}
+
+// onePass reports whether Render draws the mesh path in one pass, see
+// Camera.GPUMeshOnePass and Camera.HardwareDepth.
+func (camera *Camera) onePass() bool {
+	return (camera.GPUMeshOnePass || camera.hardwareDepth()) && camera.perspective
 }
