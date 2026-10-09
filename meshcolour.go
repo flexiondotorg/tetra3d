@@ -27,25 +27,25 @@ func meshColour(src []byte) []byte {
 	return bytes.Replace(src, []byte("\n\tdiscard()\n\n}\n"), []byte("\n\treturn vec4(0)\n\n}\n"), 1)
 }
 
-// meshColourOnePass returns the base 3D shader source src for the colour
-// pass of the mesh path with Camera.GPUMeshOnePass: meshColour with no gate.
+// meshColourHardware returns the base 3D shader source src for the colour
+// pass of the mesh path with Camera.HardwareDepth: meshColour with no gate.
 // The hardware depth test of the colour texture alone keeps the nearest
 // part, so the shader reads no depth image, and the fog takes the depth of
 // the fragment itself, which is the depth that the depth pass would keep.
-func meshColourOnePass(src []byte) []byte {
+func meshColourHardware(src []byte) []byte {
 	src = meshColour(src)
 	src = bytes.Replace(src, []byte("depth := imageSrc1UnsafeAtFromSrc0Pos(dstPosToSrcPos(dstPos.xy))"), []byte("depth := vec4(1)"), 1)
 	return bytes.ReplaceAll(src, []byte("decodeDepth(depth)"), []byte("custom.y"))
 }
 
 // hardwareColour returns the base 3D shader source src for the colour pass
-// of the sorted path with Camera.HardwareDepth: meshColourOnePass, which
+// of the sorted path with Camera.HardwareDepth: meshColourHardware, which
 // reads no depth image, with a discard of each fragment whose texture alpha
 // is at most AlphaClip, when AlphaClip is more than 0. So an alpha-clip part
 // draws its colour and its depth in one draw, as the depth pass of the
 // sorted path clips it. The vertex function is hardwareVertexSource.
 func hardwareColour(src []byte) []byte {
-	src = meshColourOnePass(src)
+	src = meshColourHardware(src)
 	src = bytes.Replace(src, []byte("var DepthGate float\n"), []byte("var DepthGate float\n\n// AlphaClip, when it is more than 0, discards a fragment whose texture alpha\n// is at most AlphaClip, see Camera.HardwareDepth.\nvar AlphaClip float\n"), 1)
 	return bytes.Replace(src, []byte("\t\t// tetra3d Custom Fragment Call Location //"), []byte("\t\tif AlphaClip > 0 && colorTex.a <= AlphaClip*color.a {\n\t\t\tdiscard()\n\t\t}\n\n\t\t// tetra3d Custom Fragment Call Location //"), 1)
 }
@@ -54,7 +54,7 @@ func hardwareColour(src []byte) []byte {
 // Camera.HardwareDepth. The CPU transform gives the pixel position in DstX
 // and DstY, the depth in Custom1, and the w of the clip position in Custom2.
 // The function gives the GPU the pixel position times w, the clip z of the
-// mesh path with Camera.GPUMeshOnePass, HardwareClip.z * (w - HardwareClip.w)
+// mesh path with Camera.HardwareDepth, HardwareClip.z * (w - HardwareClip.w)
 // for the near plane HardwareClip.w, see newGPUClipPlanes, and w. So the
 // parts of the sorted path test the same hardware depth as the mesh path.
 //
