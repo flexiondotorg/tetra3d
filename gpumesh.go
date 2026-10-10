@@ -328,9 +328,16 @@ func (mesh *Mesh) BuildGPUMeshFunc(fill func(tri, vertex int, v *ebiten.Vertex))
 		if part.TriangleCount() == 0 {
 			continue
 		}
-		// Each triangle has vertices of its own, which carry its normal.
+		// Each corner carries the normal of its triangle. Corners with the
+		// same bits share one vertex, so the vertex shader runs once for them.
 		verts := make([]ebiten.Vertex, 0, 3*part.TriangleCount())
 		idx := make([]uint32, 0, 3*part.TriangleCount())
+		// seen is an open-addressing table of indices into verts, plus one.
+		size := 1
+		for size < 6*part.TriangleCount() {
+			size <<= 1
+		}
+		seen := make([]uint32, size)
 		for t := part.TriangleStart; t <= part.TriangleEnd; t++ {
 			tv := mesh.triVertexIndices[3*t : 3*t+3]
 			p0, p1, p2 := mesh.VertexPositions[tv[0]], mesh.VertexPositions[tv[1]], mesh.VertexPositions[tv[2]]
@@ -341,12 +348,35 @@ func (mesh *Mesh) BuildGPUMeshFunc(fill func(tri, vertex int, v *ebiten.Vertex))
 				if fill != nil {
 					fill(t, int(v), &gv)
 				}
-				idx = append(idx, uint32(len(verts)))
-				verts = append(verts, gv)
+				key := gpuVertexBits(&gv)
+				h := uint32(2166136261)
+				for _, k := range key {
+					h = (h ^ k) * 16777619
+				}
+				slot := int(h) & (size - 1)
+				for seen[slot] != 0 && gpuVertexBits(&verts[seen[slot]-1]) != key {
+					slot = (slot + 1) & (size - 1)
+				}
+				if seen[slot] == 0 {
+					verts = append(verts, gv)
+					seen[slot] = uint32(len(verts))
+				}
+				idx = append(idx, seen[slot]-1)
 			}
 		}
 		part.gpuMesh = ebiten.NewMesh(verts, idx)
 		part.gpuMeshVerts = len(mesh.VertexPositions)
+	}
+}
+
+// gpuVertexBits returns the bits of each field of v, so that only
+// bit-identical vertices compare equal: unlike a float compare, it keeps
+// -0 apart from 0.
+func gpuVertexBits(v *ebiten.Vertex) [12]uint32 {
+	return [12]uint32{
+		math.Float32bits(v.DstX), math.Float32bits(v.DstY), math.Float32bits(v.SrcX), math.Float32bits(v.SrcY),
+		math.Float32bits(v.ColorR), math.Float32bits(v.ColorG), math.Float32bits(v.ColorB), math.Float32bits(v.ColorA),
+		math.Float32bits(v.Custom0), math.Float32bits(v.Custom1), math.Float32bits(v.Custom2), math.Float32bits(v.Custom3),
 	}
 }
 
