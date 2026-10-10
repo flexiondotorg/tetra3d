@@ -3,13 +3,13 @@
 This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the game Five Horizons. The readme of the upstream project is `readme.md`.
 
 - Upstream base: commit `18407def647e46ecd6d727079798ddffa68874ee` on `main`, the merge of pull request #46. It is the former base `6c1461c8f559d336e5fdadfb658f64f2a9dce453` plus our 14 commits (T01 to T14) and 8 merge commits, and nothing else. The set of T01 to T14 is now upstream, so this branch no longer carries it.
-- Branch: `fivehorizons`, one commit for each patch, 33 patches on the upstream base, and one `docs` commit on top that updates this note. A rebase rewrites the branch. Each freeze is a tag.
+- Branch: `fivehorizons`, one commit for each patch, 34 patches on the upstream base, and one `docs` commit on top that updates this note. A rebase rewrites the branch. Each freeze is a tag.
 - Planned tag: `fivehorizons-3`, for the first set on the base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the former base `6c1461c`.
 - Licence: see `LICENSE`, unchanged from upstream.
 
 ## Upstream status
 
-Upstream merged all eight of our pull requests. No pull request of ours is open. Each has a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours.
+Upstream merged eight of our pull requests. Each has a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours. Three pull requests of ours are open, see "Open pull requests".
 
 | Patches | Pull request |
 | --- | --- |
@@ -24,15 +24,27 @@ Upstream merged all eight of our pull requests. No pull request of ours is open.
 
 T06 and T08 upstream differ from the old fork commits only by our own amendments. The patches T01 to T14 are dropped from this branch because the base has them.
 
+### Open pull requests
+
+| Patches | Pull request |
+| --- | --- |
+| T37, T38, T40, T41, the deprecated API | #47 |
+| T45, the fog skip | #48 |
+| T50, an error for an invalid glTF texture index | #49, which says `Fixes #18` |
+
+T50 is the upstream commit of #49, with the same message and patch ID. It drops from this branch at the next rebase once #49 merges.
+
+T45 showed no measurable change in the stock `lighting` scene on an AMD Radeon 8060S. The median ratio of patch to base frame time was 0.97 at 1920x1080 over 5 pairs and 0.9989 at 3840x2160 over 7 pairs.
+
 ## Patch order
 
 1. T0 (T01 to T04) and T1 (T05 to T14): merged upstream, see "Upstream status". They are not on this branch.
 2. T2 (T15 to T26): optimisations and small additions that change an API or a behaviour.
 3. T3 (T27): a fork-only patch, the opt-in vertex counter behind the `vertexcount` build tag.
 4. T4 (T28 to T36, and T47): the build patch, the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer), and the depth test inside the parts of the sorted path.
-5. After the tiers (T37 to T45, and T49): the deprecated Ebitengine API (T37 to T42), the fixes for tile-based GPUs (T43 to T45), and the unsorted triangle depth (T49).
+5. After the tiers (T37 to T45, T49, and T50): the deprecated Ebitengine API (T37 to T42), the fixes for tile-based GPUs (T43 to T45), the unsorted triangle depth (T49), and the glTF texture index (T50).
 
-Patch numbers have two digits, T01 to T49, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
+Patch numbers have two digits, T01 to T50, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
 
 T01 to T27 build against stock Ebitengine. T28 adds the `replace` line of `go.mod` for the Ebitengine fork [`flexiondotorg/ebiten`](https://github.com/flexiondotorg/ebiten), branch `fivehorizons`, and the patches after it build against the fork. T29 to T36, T43, T44, and T47 need it, and T27 is a diagnostic.
 
@@ -83,6 +95,7 @@ T46 and T48 are squashed into T47, commit `22e7e49`, because T47 builds on T46.
 | T45 | `c0f46c4` | perf: skip the fog work of the colour shader when the fog is off |
 | T47 | `22e7e49` | perf: add HardwareDepth to draw the sorted path with the hardware depth test |
 | T49 | `a13af42` | perf: skip the triangle depth of a part that draws unsorted |
+| T50 | `366d6cb` | fix: return an error for an invalid glTF texture index |
 
 T49 skips the depth of each triangle when the part draws its triangles unsorted: a part with the sort mode `TriangleSortModeNone`, which includes every solid part under the depth test, needs no distance from the camera, so `processVertices` no longer reads the triangle centres or computes the distance for it. On the CPU processing path of Five Horizons at 2150 m, the flat time of `processVertices` falls by about a quarter.
 
@@ -92,8 +105,9 @@ Pace: one or two pull requests at a time. The maintainer discussed the method of
 
 | Wave | Patches | Offer | Issue first | Before sending |
 | --- | --- | --- | --- | --- |
-| 1 | T45, the fog skip | One pull request | No | Measure T45 alone on `18407de` with the stock scene on a real display. |
-| 1 | T37, T38, T40, T41, the deprecated API | One pull request | No | Re-cut the `ownDepthTexture` line of T37, because T25 adds that field. Take the upstream `go.mod` and `go.sum` and run `go mod tidy` for T40. Check screenshots. |
+| 1 | T45, the fog skip | One pull request | No | Sent as #48, open. |
+| 1 | T37, T38, T40, T41, the deprecated API | One pull request | No | Sent as #47, open. |
+| 1 | T50, the glTF texture index | One pull request | No | Sent as #49, open. |
 | 1 | T49, the unsorted triangle depth | One pull request | No | Try it on `18407de` alone. Measure it alone with the stock scene. |
 | 2 | T15 to T20, the vertex pass and the indexed output | An issue, then a series of pull requests | Yes | Ask the maintainer about indexed rendering, which upstream tried before, and about the `uint16` index cap. |
 | 2 | T21 to T24, the packed triangles | A pull request after T15 to T20 | Yes | It adds `Mesh.UpdateTriangleData()`. `VertexBones` and `VertexWeights` are empty for a mesh without bones. |
