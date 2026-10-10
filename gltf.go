@@ -43,6 +43,16 @@ type GLTFLoadOptions struct {
 	externalBufferFileSystem fs.FS // The file system to use for loading external buffers; automatically set if you use LoadGLTFFile().
 }
 
+// sRGBFromByte holds, for each 8-bit vertex colour channel value, the result of
+// ConvertTosRGB on that value divided by 255, so that loading gives the same bits.
+var sRGBFromByte = func() (table [256]float32) {
+	for i := range table {
+		v := float32(i) / math.MaxUint8
+		table[i] = NewColor4(v, v, v, 1).ConvertTosRGB().R
+	}
+	return table
+}()
+
 // DefaultGLTFLoadOptions creates an instance of GLTFLoadOptions with some sensible defaults.
 func DefaultGLTFLoadOptions() *GLTFLoadOptions {
 	return &GLTFLoadOptions{
@@ -679,11 +689,11 @@ func LoadGLTFData(data io.Reader, gltfLoadOptions *GLTFLoadOptions) (*Library, e
 					// converted from linear / to sRGB format; the GLTF addon must
 					// be doing this automatically for us now.
 					color := NewColor4(
-						float32(colorData[0])/math.MaxUint8,
-						float32(colorData[1])/math.MaxUint8,
-						float32(colorData[2])/math.MaxUint8,
+						sRGBFromByte[colorData[0]],
+						sRGBFromByte[colorData[1]],
+						sRGBFromByte[colorData[2]],
 						float32(colorData[3])/math.MaxUint8,
-					).ConvertTosRGB()
+					)
 
 					vertexData[i].Colors = append(vertexData[i].Colors, color)
 

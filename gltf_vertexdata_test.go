@@ -2,6 +2,7 @@ package tetra3d
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/qmuntal/gltf"
@@ -82,5 +83,69 @@ func TestLoadGLTFDataValidVertexData(t *testing.T) {
 	})
 	if _, err := LoadGLTFData(bytes.NewReader(data), nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSRGBFromByteMatchesConvertTosRGB(t *testing.T) {
+	for i := range 256 {
+		v := float32(i) / math.MaxUint8
+		want := NewColor4(v, v, v, 1).ConvertTosRGB()
+		got := sRGBFromByte[i]
+		for _, w := range []float32{want.R, want.G, want.B} {
+			if math.Float32bits(got) != math.Float32bits(w) {
+				t.Fatalf("entry %d: got %v, want %v", i, got, w)
+			}
+		}
+	}
+}
+
+func TestLoadGLTFDataVertexColoursAllBytes(t *testing.T) {
+	const count = 258
+	doc := gltf.NewDocument()
+	positions := make([][3]float32, count)
+	colours := make([][4]uint8, count)
+	indices := make([]uint16, count)
+	for i := range count {
+		positions[i] = [3]float32{float32(i), float32(i % 3), 0}
+		k := uint8(i)
+		colours[i] = [4]uint8{k, 255 - k, k * 7, k ^ 0x5a}
+		indices[i] = uint16(i)
+	}
+	attrs := gltf.PrimitiveAttributes{
+		gltf.POSITION: modeler.WritePosition(doc, positions),
+		"COLOR_0":     modeler.WriteColor(doc, colours),
+	}
+	idx := modeler.WriteIndices(doc, indices)
+	doc.Meshes = append(doc.Meshes, &gltf.Mesh{Name: "m", Primitives: []*gltf.Primitive{{
+		Attributes: attrs, Indices: gltf.Index(idx),
+	}}})
+	doc.Nodes = append(doc.Nodes, &gltf.Node{Name: "n", Mesh: gltf.Index(0)})
+	doc.Scenes = append(doc.Scenes, &gltf.Scene{Nodes: []int{0}})
+	doc.Scene = gltf.Index(0)
+	var buf bytes.Buffer
+	if err := gltf.NewEncoder(&buf).Encode(doc); err != nil {
+		t.Fatal(err)
+	}
+	lib, err := LoadGLTFData(bytes.NewReader(buf.Bytes()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := lib.MeshByName("m").VertexColors[0].Colors()
+	if len(got) != count {
+		t.Fatalf("got %d vertex colours, want %d", len(got), count)
+	}
+	for i, c := range colours {
+		want := NewColor4(
+			float32(c[0])/math.MaxUint8,
+			float32(c[1])/math.MaxUint8,
+			float32(c[2])/math.MaxUint8,
+			float32(c[3])/math.MaxUint8,
+		).ConvertTosRGB()
+		g := got[i]
+		for ch, pair := range [4][2]float32{{g.R, want.R}, {g.G, want.G}, {g.B, want.B}, {g.A, want.A}} {
+			if math.Float32bits(pair[0]) != math.Float32bits(pair[1]) {
+				t.Fatalf("vertex %d channel %d: got %v, want %v", i, ch, pair[0], pair[1])
+			}
+		}
 	}
 }
