@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -380,35 +381,10 @@ type Camera struct {
 
 	DebugInfo *DebugInfo
 
-	depthShader     *ebiten.Shader
-	clipAlphaShader *ebiten.Shader
-	colorShader     *ebiten.Shader
-	sprite3DShader  *ebiten.Shader
+	*cameraShaders
 
-	// The depth and colour shaders of the mesh path, see gpuMeshSource, and
-	// its draws and instance records since the last Clear.
-	depthShaderMesh, colorShaderMesh   *ebiten.Shader
-	clearShaderDepth                   *ebiten.Shader // Clears an image at the far plane with the depth test, see Camera.clearForMeshes.
-	depthShaderRigid, colorShaderRigid *ebiten.Shader
-	depthShaderPose, colorShaderPose   *ebiten.Shader
-	depthShaderBend, colorShaderBend   *ebiten.Shader
-	meshDraws, meshInstances           int
-
-	// The depth shaders of the mesh path for GPUMeshDirectDepth, see
-	// directDepthShaderSource.
-	directDepthMesh, directDepthRigid, directDepthBend, directDepthPose *ebiten.Shader
-
-	// The colour shaders of the mesh path for HardwareDepth, with no gate,
-	// see meshColourHardware.
-	hardwareMesh, hardwareRigid, hardwareBend, hardwarePose *ebiten.Shader
-
-	// The depth and colour shaders of the depth test inside a part, see
-	// sortedVertexSource.
-	depthShaderSorted, colorShaderSorted *ebiten.Shader
-
-	// The colour shader of the sorted path with HardwareDepth, see
-	// hardwareColour and hardwareVertexSource.
-	colorShaderHardware *ebiten.Shader
+	// The draws and instance records of the mesh path since the last Clear.
+	meshDraws, meshInstances int
 
 	// Visibility check variables
 	cameraForward          Vector3
@@ -460,6 +436,56 @@ func NewCamera(name string, w, h int) *Camera {
 
 	cam.owner = cam
 
+	cam.cameraShaders = sharedCameraShaders()
+
+	if w != 0 && h != 0 {
+		cam.Resize(w, h)
+	}
+
+	cam.SetPerspective(true)
+	cam.SetFieldOfView(60)
+
+	return cam
+}
+
+// cameraShaders holds the shaders that every Camera draws with. A shader
+// holds no state of its own, so all cameras share one set, see
+// sharedCameraShaders.
+type cameraShaders struct {
+	depthShader     *ebiten.Shader
+	clipAlphaShader *ebiten.Shader
+	colorShader     *ebiten.Shader
+	sprite3DShader  *ebiten.Shader
+
+	// The depth and colour shaders of the mesh path, see gpuMeshSource.
+	depthShaderMesh, colorShaderMesh   *ebiten.Shader
+	clearShaderDepth                   *ebiten.Shader // Clears an image at the far plane with the depth test, see Camera.clearForMeshes.
+	depthShaderRigid, colorShaderRigid *ebiten.Shader
+	depthShaderPose, colorShaderPose   *ebiten.Shader
+	depthShaderBend, colorShaderBend   *ebiten.Shader
+
+	// The depth shaders of the mesh path for GPUMeshDirectDepth, see
+	// directDepthShaderSource.
+	directDepthMesh, directDepthRigid, directDepthBend, directDepthPose *ebiten.Shader
+
+	// The colour shaders of the mesh path for HardwareDepth, with no gate,
+	// see meshColourHardware.
+	hardwareMesh, hardwareRigid, hardwareBend, hardwarePose *ebiten.Shader
+
+	// The depth and colour shaders of the depth test inside a part, see
+	// sortedVertexSource.
+	depthShaderSorted, colorShaderSorted *ebiten.Shader
+
+	// The colour shader of the sorted path with HardwareDepth, see
+	// hardwareColour and hardwareVertexSource.
+	colorShaderHardware *ebiten.Shader
+}
+
+// sharedCameraShaders compiles the shaders of cameraShaders once per process.
+var sharedCameraShaders = sync.OnceValue(func() *cameraShaders {
+
+	s := &cameraShaders{}
+
 	depthShaderText := []byte(
 		`package main
 
@@ -501,7 +527,7 @@ func NewCamera(name string, w, h int) *Camera {
 
 	var err error
 
-	cam.depthShader, err = ebiten.NewShader(depthShaderText)
+	s.depthShader, err = ebiten.NewShader(depthShaderText)
 
 	if err != nil {
 		panic(err)
@@ -609,76 +635,76 @@ func NewCamera(name string, w, h int) *Camera {
 		`,
 	)
 
-	cam.clipAlphaShader, err = ebiten.NewShader(clipAlphaShaderText)
+	s.clipAlphaShader, err = ebiten.NewShader(clipAlphaShaderText)
 
 	if err != nil {
 		panic(err)
 	}
 
-	cam.colorShader, err = ExtendBase3DShader("")
+	s.colorShader, err = ExtendBase3DShader("")
 
 	if err != nil {
 		panic(err)
 	}
 
-	if cam.depthShaderMesh, err = ebiten.NewShader(withGPUMesh(depthShaderText)); err != nil {
+	if s.depthShaderMesh, err = ebiten.NewShader(withGPUMesh(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.clearShaderDepth, err = ebiten.NewShader(clearDepthShaderSource); err != nil {
+	if s.clearShaderDepth, err = ebiten.NewShader(clearDepthShaderSource); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(meshColour(base3DShaderSource("")))); err != nil {
+	if s.colorShaderMesh, err = ebiten.NewShader(withGPUMesh(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.depthShaderRigid, err = ebiten.NewShader(withGPURigid(depthShaderText)); err != nil {
+	if s.depthShaderRigid, err = ebiten.NewShader(withGPURigid(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderRigid, err = ebiten.NewShader(withGPURigid(meshColour(base3DShaderSource("")))); err != nil {
+	if s.colorShaderRigid, err = ebiten.NewShader(withGPURigid(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.depthShaderBend, err = ebiten.NewShader(withGPUBend(depthShaderText)); err != nil {
+	if s.depthShaderBend, err = ebiten.NewShader(withGPUBend(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderBend, err = ebiten.NewShader(withGPUBend(meshColour(base3DShaderSource("")))); err != nil {
+	if s.colorShaderBend, err = ebiten.NewShader(withGPUBend(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.depthShaderPose, err = ebiten.NewShader(withGPUPose(depthShaderText)); err != nil {
+	if s.depthShaderPose, err = ebiten.NewShader(withGPUPose(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderPose, err = ebiten.NewShader(withGPUPose(meshColour(base3DShaderSource("")))); err != nil {
+	if s.colorShaderPose, err = ebiten.NewShader(withGPUPose(meshColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.depthShaderSorted, err = ebiten.NewShader(withSortedVertex(depthShaderText)); err != nil {
+	if s.depthShaderSorted, err = ebiten.NewShader(withSortedVertex(depthShaderText)); err != nil {
 		panic(err)
 	}
-	if cam.directDepthMesh, err = ebiten.NewShader(withGPUMesh(directDepthShaderSource)); err != nil {
+	if s.directDepthMesh, err = ebiten.NewShader(withGPUMesh(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
-	if cam.directDepthRigid, err = ebiten.NewShader(withGPURigid(directDepthShaderSource)); err != nil {
+	if s.directDepthRigid, err = ebiten.NewShader(withGPURigid(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
-	if cam.directDepthBend, err = ebiten.NewShader(withGPUBend(directDepthShaderSource)); err != nil {
+	if s.directDepthBend, err = ebiten.NewShader(withGPUBend(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
-	if cam.directDepthPose, err = ebiten.NewShader(withGPUPose(directDepthShaderSource)); err != nil {
+	if s.directDepthPose, err = ebiten.NewShader(withGPUPose(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
-	if cam.hardwareMesh, err = ebiten.NewShader(withGPUMesh(meshColourHardware(base3DShaderSource("")))); err != nil {
+	if s.hardwareMesh, err = ebiten.NewShader(withGPUMesh(meshColourHardware(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.hardwareRigid, err = ebiten.NewShader(withGPURigid(meshColourHardware(base3DShaderSource("")))); err != nil {
+	if s.hardwareRigid, err = ebiten.NewShader(withGPURigid(meshColourHardware(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.hardwareBend, err = ebiten.NewShader(withGPUBend(meshColourHardware(base3DShaderSource("")))); err != nil {
+	if s.hardwareBend, err = ebiten.NewShader(withGPUBend(meshColourHardware(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.hardwarePose, err = ebiten.NewShader(withGPUPose(meshColourHardware(base3DShaderSource("")))); err != nil {
+	if s.hardwarePose, err = ebiten.NewShader(withGPUPose(meshColourHardware(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
+	if s.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
 		panic(err)
 	}
-	if cam.colorShaderHardware, err = ebiten.NewShader(withHardwareVertex(hardwareColour(base3DShaderSource("")))); err != nil {
+	if s.colorShaderHardware, err = ebiten.NewShader(withHardwareVertex(hardwareColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 
@@ -714,21 +740,14 @@ func NewCamera(name string, w, h int) *Camera {
 		`,
 	)
 
-	cam.sprite3DShader, err = ebiten.NewShader(sprite3DShaderText)
+	s.sprite3DShader, err = ebiten.NewShader(sprite3DShaderText)
 
 	if err != nil {
 		panic(err)
 	}
 
-	if w != 0 && h != 0 {
-		cam.Resize(w, h)
-	}
-
-	cam.SetPerspective(true)
-	cam.SetFieldOfView(60)
-
-	return cam
-}
+	return s
+})
 
 // Clone clones the Camera and returns it.
 func (camera *Camera) Clone() INode {
