@@ -283,6 +283,10 @@ var rigidShaders = map[*ebiten.Shader]*ebiten.Shader{}
 // ExtendBase3DShader makes.
 var bendShaders = map[*ebiten.Shader]*ebiten.Shader{}
 
+// hardwareRigidShaders and hardwareBendShaders hold the variants of
+// rigidShaders and bendShaders for Camera.HardwareDepth.
+var hardwareRigidShaders, hardwareBendShaders = map[*ebiten.Shader]*ebiten.Shader{}, map[*ebiten.Shader]*ebiten.Shader{}
+
 // rigidRecord returns the instance record of gpuRigidSource for model, with
 // a depth bias.
 func rigidRecord(model *Model, bias float32) ebiten.Vertex {
@@ -403,11 +407,23 @@ func (camera *Camera) gpuMeshPart(model *Model, part *MeshPart, lighting bool) b
 		return false
 	}
 	mat := part.Material
-	variants := rigidShaders
-	if model.GPUBend != nil {
-		variants = bendShaders
-	}
+	variants := camera.rigidVariants(model)
 	return mat == nil || mat.TransparencyMode != TransparencyModeAlphaClip && (!mat.shaderOn() || variants[mat.fragmentShader] != nil)
+}
+
+// rigidVariants returns the variants of the fragment shaders of materials
+// that the colour pass of the mesh path draws model with.
+func (camera *Camera) rigidVariants(model *Model) map[*ebiten.Shader]*ebiten.Shader {
+	hardware := camera.hardwareDepth()
+	switch {
+	case model.GPUBend != nil && hardware:
+		return hardwareBendShaders
+	case model.GPUBend != nil:
+		return bendShaders
+	case hardware:
+		return hardwareRigidShaders
+	}
+	return rigidShaders
 }
 
 // MeshBatch is a mesh that Camera.RenderMeshes draws once for each instance
@@ -511,7 +527,7 @@ func sameRGB(a, b *Model) bool {
 func (camera *Camera) RenderMeshes(scene *Scene, batches []MeshBatch) {
 	draw := camera.appendBatches(batches)
 	list := draw.meshDraws[draw.queued:]
-	camera.drawMeshes(scene, list)
+	camera.drawMeshes(scene, list, false)
 	clear(list)
 	draw.meshDraws = draw.meshDraws[:draw.queued]
 }
@@ -625,13 +641,20 @@ var clearIndices = [6]uint32{0, 1, 2, 1, 3, 2}
 // depth texture with the hardware depth test against the depth buffer of
 // the depth texture, and the colour pass reads the depth texture in place
 // of depthIntermediate.
-func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
+//
+// With hardware, see Camera.HardwareDepth, there is no depth pass: the
+// colour pass draws each part with the shaders that have no gate, and then
+// Camera.AfterMeshColour runs, also when the list is empty.
+func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw, hardware bool) {
 	if len(list) == 0 {
+		if hardware && camera.AfterMeshColour != nil {
+			camera.AfterMeshColour()
+		}
 		return
 	}
 	draw := camera.draw
 	vp := camera.ViewMatrix().Mult(camera.Projection())
-	direct := camera.GPUMeshDirectDepth && camera.perspective
+	direct := (camera.GPUMeshDirectDepth || hardware) && camera.perspective
 	clip := newGPUClip(camera.Projection(), camera.near, camera.far)
 	if direct {
 		clip = newGPUClipPlanes(camera.Projection(), camera.near, camera.far)
@@ -675,10 +698,15 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 	} else {
 		camera.clearForMeshes(camera.depthIntermediate)
 	}
+	// With hardware, the colour pass alone draws the parts.
+	depthList := list
+	if hardware {
+		depthList = nil
+	}
 	opt := &draw.meshDepthOptions
 	opt.Images[0] = depthSrc
-	for i := range list {
-		d := &list[i]
+	for i := range depthList {
+		d := &depthList[i]
 		uniforms(d)
 		opt.Mesh = d.part.gpuMesh
 		shader := meshShader
@@ -698,6 +726,14 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 	// The colour pass tests the depth with its own hardware depth buffer, so
 	// it takes no depth gate from the last draw of the sorted path.
 	draw.depthGate[0] = 0
+	gate := depthDst
+	colourMesh, colourRigid, colourBend, colourPose := camera.colorShaderMesh, camera.colorShaderRigid, camera.colorShaderBend, camera.colorShaderPose
+	passes := 2
+	if hardware {
+		gate = nil
+		colourMesh, colourRigid, colourBend, colourPose = camera.hardwareMesh, camera.hardwareRigid, camera.hardwareBend, camera.hardwarePose
+		passes = 1
+	}
 	opt = &draw.meshColorOptions
 	for i := range list {
 		d := &list[i]
@@ -718,17 +754,17 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		uniforms(d)
 		draw.setPartUniforms(0, filter, 0, 1, 1)
 		opt.Uniforms = draw.colorUniforms(world, fogless, false)
-		opt.Images[0], opt.Images[1] = img, depthDst
+		opt.Images[0], opt.Images[1] = img, gate
 		opt.Mesh = d.part.gpuMesh
-		shader := camera.colorShaderMesh
+		shader := colourMesh
 		if d.pose {
-			shader = camera.colorShaderPose
+			shader = colourPose
 		}
 		if d.model != nil {
-			variants := rigidShaders
-			shader = camera.colorShaderRigid
+			variants := camera.rigidVariants(d.model)
+			shader = colourRigid
 			if d.model.GPUBend != nil {
-				shader, variants = camera.colorShaderBend, bendShaders
+				shader = colourBend
 			}
 			if mat.shaderOn() {
 				// A fragment shader of a material, with its uniforms and
@@ -746,11 +782,20 @@ func (camera *Camera) drawMeshes(scene *Scene, list []meshDraw) {
 		}
 		camera.resultColorTexture.DrawTrianglesShader32(d.records, nil, shader, opt)
 
-		camera.meshDraws += 2
+		camera.meshDraws += passes
 		camera.meshInstances += len(d.records)
 		if camera.DebugInfo.On {
 			camera.DebugInfo.drawnParts++
 			camera.DebugInfo.drawnTris += d.part.TriangleCount() * len(d.records)
 		}
 	}
+
+	if hardware && camera.AfterMeshColour != nil {
+		camera.AfterMeshColour()
+	}
+}
+
+// hardwareDepth reports whether Render draws with Camera.HardwareDepth.
+func (camera *Camera) hardwareDepth() bool {
+	return camera.HardwareDepth && camera.perspective && camera.RenderDepth && !camera.RenderNormals
 }

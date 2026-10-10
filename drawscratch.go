@@ -56,6 +56,10 @@ type drawScratch struct {
 	// pass, see base3d.kage.
 	sortedClip, depthGate []float32
 
+	// The uniforms of the sorted path with Camera.HardwareDepth, in every
+	// map, see hardwareVertexSource and hardwareColour.
+	hardwareClip, hardwareCustom, alphaClip []float32
+
 	// The parts, the cull uniform, and the options of the mesh path. The
 	// first queued parts of meshDraws come from Camera.QueueMeshes.
 	meshDraws                          []meshDraw
@@ -106,6 +110,9 @@ func newDrawScratch() *drawScratch {
 		bendStretch:           make([]float32, 4),
 		sortedClip:            make([]float32, 2),
 		depthGate:             make([]float32, 1),
+		hardwareClip:          make([]float32, 4),
+		hardwareCustom:        make([]float32, 1),
+		alphaClip:             make([]float32, 1),
 	}
 	s.foglessValue = s.fogless
 	s.foglessNormal = []int{1}
@@ -149,6 +156,9 @@ func newDrawScratch() *drawScratch {
 		m["GPUBendFirst"] = s.bendFirst
 		m["GPUBendSecond"] = s.bendSecond
 		m["GPUBendStretch"] = s.bendStretch
+		m["HardwareClip"] = s.hardwareClip
+		m["HardwareCustom"] = s.hardwareCustom
+		m["AlphaClip"] = s.alphaClip
 	}
 	s.depthOptions.Uniforms = gpu
 	s.meshDepthOptions.Uniforms = gpu

@@ -15,3 +15,9 @@ This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the
 5. T4: the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer) and the depth test inside the parts of the sorted path.
 
 T0 to T3 build against stock Ebitengine. T4 needs the Ebitengine fork [`flexiondotorg/ebiten`](https://github.com/flexiondotorg/ebiten), branch `fivehorizons`, so `go.mod` has a `replace` line for it from the first T4 patch. The patches of T0 to T2 are offered upstream one at a time.
+
+T46, the one pass of the mesh path (`Camera.GPUMeshOnePass` and `Camera.AfterMeshColour`), is a T4 patch: the parts draw their colour once with no depth pass, and a full-screen draw resolves the hardware depth of the colour texture into the depth texture. It needs `DrawTrianglesShaderOptions.ImageDepth` and `ebiten.IsDepthSourceSupported` of the Ebitengine fork.
+
+T47, the hardware depth of the colour texture (`Camera.HardwareDepth`), is a T4 patch: `Render` draws the mesh path in one pass, runs `Camera.AfterMeshColour`, and draws each part of the sorted path once into the colour texture with the hardware depth test. Solid parts test and write the depth, alpha-clip parts also discard, and transparent parts test without a write, back to front. There is no depth texture, no `depthIntermediate`, no clear, no copy, and no resolve. It needs `DrawTrianglesShaderOptions.DepthReadOnly` of the Ebitengine fork, which also maps the clip z of a vertex function to a depth from 0 to 1 on OpenGL, so the resolve of T46 decodes that range.
+
+T48 removes the one pass of T46 as a mode of its own, a T4 patch: `Camera.GPUMeshOnePass`, the depth resolve and its shader go, and the colour shaders of the mesh path with no gate now belong to `Camera.HardwareDepth`, which keeps `Camera.AfterMeshColour`. Without `HardwareDepth`, the mesh path draws its depth pass as before.

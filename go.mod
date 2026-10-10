@@ -22,4 +22,4 @@ require (
 
 // This fork calls the mesh path of the Ebitengine fork (ebiten.NewMesh), so
 // build and test it against that fork, as the game does.
-replace github.com/hajimehoshi/ebiten/v2 => github.com/flexiondotorg/ebiten/v2 v2.0.0-20261006021447-938520fcbc59
+replace github.com/hajimehoshi/ebiten/v2 => github.com/flexiondotorg/ebiten/v2 v2.0.0-20261009102921-682704385013

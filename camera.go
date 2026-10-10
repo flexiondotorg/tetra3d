@@ -342,6 +342,42 @@ type Camera struct {
 	// caller must not write an alpha of 1. Defaults to false.
 	GPUMeshDirectDepth bool
 
+	// AfterMeshColour, when not nil, runs inside Render with HardwareDepth,
+	// after the colour pass of the mesh path and before the sorted path, also
+	// when the mesh path draws nothing. A
+	// caller can draw into ColorTexture there with the hardware depth test
+	// against the mesh parts. Set it once, not in each frame, as a new
+	// closure allocates. Defaults to nil.
+	AfterMeshColour func()
+
+	// HardwareDepth draws Render with the hardware depth buffer of the colour
+	// texture alone, and leaves the depth texture as it was. The mesh path
+	// has no depth pass: each part draws its colour once with the hardware
+	// depth test of the colour texture and no gate, and the fog takes the
+	// depth of the fragment itself. AfterMeshColour runs after it. Then each
+	// part of the sorted path draws its colour once
+	// into the colour texture with the hardware depth test, with no
+	// depthIntermediate, no clear, and no copy: a solid part tests and writes
+	// its depth, an alpha-clip part also discards the fragments that its
+	// alpha clips, and a transparent part tests the depth without writing it,
+	// back to front. The sorted path takes the clip z of the mesh path, see
+	// hardwareVertexSource, so the parts of both paths and the surfaces of
+	// the caller test one depth. The caller reads that depth from the colour
+	// texture, see ebiten.DrawTrianglesShaderOptions.ImageDepth.
+	//
+	// The clip z is at the exact near and far planes, as with
+	// GPUMeshDirectDepth. A caller with surfaces of its own draws their depth
+	// into ColorTexture with the hardware depth test and that clip z: before
+	// Render, as the first depth draw of the colour texture in the frame, to
+	// hide the parts behind them, or in AfterMeshColour, to skip the pixels
+	// of nearer parts.
+	//
+	// It needs a perspective camera, RenderDepth, no RenderNormals, and the
+	// depth options of the Ebitengine fork. A fragment shader of a material
+	// must come from ExtendBase3DShader, or its part draws with no depth
+	// test. It turns DepthInParts off. Defaults to false.
+	HardwareDepth bool
+
 	DebugInfo *DebugInfo
 
 	depthShader     *ebiten.Shader
@@ -362,9 +398,17 @@ type Camera struct {
 	// directDepthShaderSource.
 	directDepthMesh, directDepthRigid, directDepthBend, directDepthPose *ebiten.Shader
 
+	// The colour shaders of the mesh path for HardwareDepth, with no gate,
+	// see meshColourHardware.
+	hardwareMesh, hardwareRigid, hardwareBend, hardwarePose *ebiten.Shader
+
 	// The depth and colour shaders of the depth test inside a part, see
 	// sortedVertexSource.
 	depthShaderSorted, colorShaderSorted *ebiten.Shader
+
+	// The colour shader of the sorted path with HardwareDepth, see
+	// hardwareColour and hardwareVertexSource.
+	colorShaderHardware *ebiten.Shader
 
 	// Visibility check variables
 	cameraForward          Vector3
@@ -619,7 +663,22 @@ func NewCamera(name string, w, h int) *Camera {
 	if cam.directDepthPose, err = ebiten.NewShader(withGPUPose(directDepthShaderSource)); err != nil {
 		panic(err)
 	}
+	if cam.hardwareMesh, err = ebiten.NewShader(withGPUMesh(meshColourHardware(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.hardwareRigid, err = ebiten.NewShader(withGPURigid(meshColourHardware(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.hardwareBend, err = ebiten.NewShader(withGPUBend(meshColourHardware(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
+	if cam.hardwarePose, err = ebiten.NewShader(withGPUPose(meshColourHardware(base3DShaderSource("")))); err != nil {
+		panic(err)
+	}
 	if cam.colorShaderSorted, err = ebiten.NewShader(withSortedVertex(base3DShaderSource(""))); err != nil {
+		panic(err)
+	}
+	if cam.colorShaderHardware, err = ebiten.NewShader(withHardwareVertex(hardwareColour(base3DShaderSource("")))); err != nil {
 		panic(err)
 	}
 
@@ -1619,6 +1678,20 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		draw.sortedClip[0], draw.sortedClip[1] = c.k, c.near
 	}
 
+	// hardware is true when the sorted path draws with HardwareDepth.
+	hardware := camera.hardwareDepth()
+	if hardware {
+		proj := camera.Projection()
+		c := newGPUClipPlanes(proj, camera.near, camera.far)
+		// The distance along the view of a depth in Custom1, see
+		// hardwareVertexSource: the depth is (clip z + margin) / spread, and
+		// the w of a clip z is linear in it, see newGPUClip.
+		f := proj[2][3] / proj[2][2]
+		draw.hardwareClip[0] = camSpread * f
+		draw.hardwareClip[1] = (-depthMarginPercentage-proj[3][2])*f + proj[3][3]
+		draw.hardwareClip[2], draw.hardwareClip[3] = c.k, c.near
+	}
+
 	// partBase is the place in the vertex lists of the first vertex of the
 	// part that render writes. The indices of the part count from it, so
 	// that each part of a batch keeps the uint16 limit for itself.
@@ -1651,7 +1724,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		}
 
 		globalSortingTriangleBucket.sortMode = TriangleSortModeBackToFront
-		if partDepthOn {
+		if partDepthOn || hardware && !model.isTransparent(meshPart) && (mat == nil || mat.TransparencyMode != TransparencyModeAlphaClip) {
 			// The depth test inside the part keeps the nearest triangle.
 			globalSortingTriangleBucket.sortMode = TriangleSortModeNone
 		} else if meshPart.Material != nil {
@@ -2109,8 +2182,9 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		img := partImage(rp)
 
-		// Render the depth map here
-		if camera.RenderDepth {
+		// Render the depth map here. With HardwareDepth, the colour draw tests
+		// the depth itself.
+		if camera.RenderDepth && !hardware {
 
 			// OK, so the general process for rendering to the depth texture is three-fold:
 			// 1) For solid objects, we simply render all triangles using camera.DepthShader. This draws triangles using their vertices'
@@ -2207,6 +2281,23 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 		colorPassShaderOptions.Images[0] = img
 		colorPassShaderOptions.Images[1] = camera.depthIntermediate
 
+		if hardware {
+			// The part tests the hardware depth of the colour texture, and a
+			// transparent part writes none, see HardwareDepth.
+			colorPassShaderOptions.Images[1] = nil
+			colorPassShaderOptions.Depth = true
+			colorPassShaderOptions.DepthReadOnly = rp.Model.isTransparent(rp.MeshPart)
+			// The alpha clip of clipAlphaShader.
+			draw.alphaClip[0] = 0
+			if mat != nil && mat.TransparencyMode == TransparencyModeAlphaClip {
+				draw.alphaClip[0] = 0.8
+			}
+			draw.hardwareCustom[0] = 0
+			if mat != nil && (mat.CustomDepthFunction != nil || mat.BillboardedDepthMode == DepthModeUnbillboarded) {
+				draw.hardwareCustom[0] = 1
+			}
+		}
+
 		fogless := float32(0)
 		if mat != nil && mat.Fogless {
 			fogless = 1
@@ -2255,9 +2346,18 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 				if partDepthOn {
 					shader = sortedShaders[shader]
 				}
+				if hardware {
+					if h := hardwareShaders[shader]; h != nil {
+						shader = h
+					} else {
+						colorPassShaderOptions.Depth = false
+					}
+				}
 				camera.resultColorTexture.DrawTrianglesShader(verts, indices, shader, colorPassShaderOptions)
 			} else {
-				if partDepthOn {
+				if hardware {
+					camera.resultColorTexture.DrawTrianglesShader(verts, indices, camera.colorShaderHardware, colorPassShaderOptions)
+				} else if partDepthOn {
 					camera.resultColorTexture.DrawTrianglesShader(verts, indices, camera.colorShaderSorted, colorPassShaderOptions)
 				} else {
 					camera.resultColorTexture.DrawTrianglesShader(verts, indices, camera.colorShader, colorPassShaderOptions)
@@ -2373,7 +2473,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 	// The mesh path draws first, so that the sorted path compares against its
 	// depth.
 	draw.groupRigid(camera)
-	camera.drawMeshes(scene, draw.meshDraws)
+	camera.drawMeshes(scene, draw.meshDraws, camera.hardwareDepth())
 	clear(draw.meshDraws)
 	draw.queued = 0
 
@@ -2383,7 +2483,7 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		for _, pair := range pass {
 
-			partDepthOn = passIndex == 0 && camera.partDepth(pair.Model, pair.MeshPart)
+			partDepthOn = !hardware && passIndex == 0 && camera.partDepth(pair.Model, pair.MeshPart)
 
 			// Automatically statically batched models can't render
 			if !pair.Model.visible || pair.Model.AutoBatchMode == AutoBatchStatic {
