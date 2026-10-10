@@ -576,10 +576,7 @@ func (node *Node) Transform() Matrix4 {
 		return node.cachedTransform
 	}
 
-	// TODO: I think I could speed up this area considerably.
-	transform := NewMatrix4Scale(node.scale.X, node.scale.Y, node.scale.Z)
-	transform = transform.Mult(node.rotation)
-	transform = transform.Mult(NewMatrix4Translate(node.position.X, node.position.Y, node.position.Z))
+	transform := newMatrix4TRS(node.position, node.rotation, node.scale)
 
 	if node.parent != nil {
 		transform = transform.Mult(node.parent.Transform())
