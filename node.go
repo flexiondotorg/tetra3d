@@ -216,6 +216,7 @@ type INode interface {
 
 	// updateLocalTransform(newParent INode)
 	dirtyTransform()
+	forceDirtyTransform()
 
 	// ClearLocalTransform clears the local transform properties (position, scale, and rotation) for the Node, reverting it to essentially an
 	// identity matrix (0, 0, 0 for position, 1, 1, 1 for scale, and an identity Matrix4 for rotation, indicating no rotation).
@@ -540,7 +541,7 @@ func (node *Node) clone(newOwner INode) INode {
 		}
 	}
 
-	newNode.dirtyTransform()
+	newNode.forceDirtyTransform()
 
 	newNode.isBone = node.isBone
 	if newNode.isBone {
@@ -613,10 +614,29 @@ func (node *Node) SetWorldTransform(transform Matrix4) {
 
 // dirtyTransform sets this Node and all recursive children's isTransformDirty flags to be true, indicating that they need to be
 // rebuilt. This should be called when modifying the transformation properties (position, scale, rotation) of the Node.
+// The walk stops at a Node that is already dirty: only Transform() clears the flag, and only after its parent is clean, so
+// all descendants of a dirty Node are dirty too.
 func (node *Node) dirtyTransform() {
+
+	if node.isTransformDirty {
+		return
+	}
 
 	for _, child := range node.children {
 		child.dirtyTransform()
+	}
+
+	node.isTransformDirty = true
+	node.cachedSector = nil
+
+}
+
+// forceDirtyTransform dirties this Node and all recursive children, even the ones that are already dirty. A dirty Node can
+// still keep a Sector from its hierarchy, so a change of hierarchy or a clone must clear that Sector all the way down.
+func (node *Node) forceDirtyTransform() {
+
+	for _, child := range node.children {
+		child.forceDirtyTransform()
 	}
 
 	node.isTransformDirty = true
@@ -1149,7 +1169,7 @@ func (node *Node) AddChildren(children ...INode) {
 		}
 
 		child.setParent(me)
-		child.dirtyTransform()
+		child.forceDirtyTransform()
 		node.children = append(node.children, child.getOwner())
 
 		if runCallbacks && child.Callbacks().OnReparent != nil {
@@ -1186,7 +1206,7 @@ func (node *Node) RemoveChildren(children ...INode) {
 				// child.updateLocalTransform(nil)
 				prevParent := child1.Parent()
 				child1.setParent(nil)
-				child1.dirtyTransform()
+				child1.forceDirtyTransform()
 
 				node.children[i] = nil
 				node.children = append(node.children[:i], node.children[i+1:]...)
