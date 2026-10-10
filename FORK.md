@@ -3,7 +3,7 @@
 This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the game Five Horizons. The readme of the upstream project is `readme.md`.
 
 - Upstream base: commit `18407def647e46ecd6d727079798ddffa68874ee` on `main`, the merge of pull request #46. It is the former base `6c1461c8f559d336e5fdadfb658f64f2a9dce453` plus our 14 commits (T01 to T14) and 8 merge commits, and nothing else. The set of T01 to T14 is now upstream, so this branch no longer carries it.
-- Branch: `fivehorizons`, one commit for each patch, 34 patches on the upstream base, and one `docs` commit on top that updates this note. A rebase rewrites the branch. Each freeze is a tag.
+- Branch: `fivehorizons`, one commit for each patch, 42 patches on the upstream base, one `build` commit for the Ebitengine pin, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
 - Planned tag: `fivehorizons-3`, for the first set on the base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the former base `6c1461c`.
 - Licence: see `LICENSE`, unchanged from upstream.
 
@@ -43,8 +43,9 @@ T45 showed no measurable change in the stock `lighting` scene on an AMD Radeon 8
 3. T3 (T27): a fork-only patch, the opt-in vertex counter behind the `vertexcount` build tag.
 4. T4 (T28 to T36, and T47): the build patch, the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer), and the depth test inside the parts of the sorted path.
 5. After the tiers (T37 to T45, T49, and T50): the deprecated Ebitengine API (T37 to T42), the fixes for tile-based GPUs (T43 to T45), the unsorted triangle depth (T49), and the glTF texture index (T50).
+6. The performance audit (T51 to T58), after the build commit that pins the Ebitengine fork freeze `fivehorizons-4`.
 
-Patch numbers have two digits, T01 to T50, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
+Patch numbers have two digits, T01 to T58, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
 
 T01 to T27 build against stock Ebitengine. T28 adds the `replace` line of `go.mod` for the Ebitengine fork [`flexiondotorg/ebiten`](https://github.com/flexiondotorg/ebiten), branch `fivehorizons`, and the patches after it build against the fork. T29 to T36, T43, T44, and T47 need it, and T27 is a diagnostic.
 
@@ -96,6 +97,16 @@ T46 and T48 are squashed into T47, commit `22e7e49`, because T47 builds on T46.
 | T47 | `22e7e49` | perf: add HardwareDepth to draw the sorted path with the hardware depth test |
 | T49 | `a13af42` | perf: skip the triangle depth of a part that draws unsorted |
 | T50 | `366d6cb` | fix: return an error for an invalid glTF texture index |
+| T51 | `1948ebf` | perf: convert vertex colours to sRGB with a lookup table |
+| T52 | `38dffbf` | perf: allocate the triangles of a mesh in one block |
+| T53 | `5b54a71` | perf: compile the camera shaders once for all cameras |
+| T54 | `8a8df17` | perf: build the local transform of a node in closed form |
+| T55 | `b4a115d` | perf: stop the dirty walk at a node that is already dirty |
+| T56 | `c1caae3` | perf: compute the inverse and the decomposition of a part only when used |
+| T57 | `722b4a9` | perf: sort the triangles of a small part with an insertion sort |
+| T58 | `5b1fbcb` | perf: merge identical vertices of a GPU mesh |
+
+T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `be26653` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path.
 
 T49 skips the depth of each triangle when the part draws its triangles unsorted: a part with the sort mode `TriangleSortModeNone`, which includes every solid part under the depth test, needs no distance from the camera, so `processVertices` no longer reads the triangle centres or computes the distance for it. On the CPU processing path of Five Horizons at 2150 m, the flat time of `processVertices` falls by about a quarter.
 
