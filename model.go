@@ -637,8 +637,12 @@ func (model *Model) processVertices(vpMatrix Matrix4, camera *Camera, meshPart *
 	// invertedCamPos := modelTransform.Inverted().MultVec(camPos)
 
 	// TODO: Review this, as it still seems problematic when it comes to distance checks for pre-emptive culling?
-	p, s, r := modelTransform.Inverted().Decompose()
-	invertedCamPos := r.MultVec(camPos).Add(p.Mult(Vector3{1 / s.X, 1 / s.Y, 1 / s.Z}))
+	// Only the subdivision and the triangle depth of an unskinned model read it.
+	var invertedCamPos Vector3
+	if !model.skinned && (mesh.autoSubdivide || globalSortingTriangleBucket.sortMode != TriangleSortModeNone) {
+		p, s, r := modelTransform.Inverted().Decompose()
+		invertedCamPos = r.MultVec(camPos).Add(p.Mult(Vector3{1 / s.X, 1 / s.Y, 1 / s.Z}))
+	}
 
 	// invertedCamPos := camPos
 

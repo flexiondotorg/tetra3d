@@ -174,8 +174,6 @@ func (p *PointLight) beginRender() {}
 
 func (p *PointLight) beginModel(model *Model) {
 
-	pos, sca, rot := model.Transform().Inverted().Decompose()
-
 	// Rather than transforming all vertices of all triangles of a mesh, we can just transform the
 	// point light's position by the inversion of the model's transform to get the same effect and save processing time.
 	// The same technique is used for Sphere - Triangle collision in bounds.go.
@@ -183,6 +181,7 @@ func (p *PointLight) beginModel(model *Model) {
 	if model.skinned {
 		p.workingPosition = p.WorldPosition()
 	} else {
+		pos, sca, rot := model.Transform().Inverted().Decompose()
 		p.workingPosition = rot.MultVec(p.WorldPosition()).Add(pos.Mult(Vector3{1 / sca.X, 1 / sca.Y, 1 / sca.Z}))
 	}
 
