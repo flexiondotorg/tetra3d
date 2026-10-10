@@ -53,7 +53,7 @@ func TestSortingTriangleBucketOrder(t *testing.T) {
 			bucket.sortMode = sortMode
 
 			// Sort more than once to check that the buffers are reused correctly.
-			for _, triCount := range []int{2000, 40000, 700} {
+			for _, triCount := range []int{2000, 40000, 700, insertionSortMaxTris, 12, insertionSortMaxTris + 1, 1} {
 
 				tris := make([]*Triangle, triCount)
 				depths := make([]float32, triCount)
@@ -90,6 +90,57 @@ func TestSortingTriangleBucketOrder(t *testing.T) {
 				}
 
 				bucket.Clear()
+
+			}
+
+		}
+
+	}
+
+}
+
+func TestSortingTriangleBucketInsertionSort(t *testing.T) {
+
+	random := rand.New(rand.NewSource(1))
+
+	for _, binCount := range []int{2, 8, 512} {
+
+		for _, sortMode := range []int{TriangleSortModeBackToFront, TriangleSortModeFrontToBack} {
+
+			bucket := newSortingTriangleBucket()
+			bucket.Resize(binCount)
+			bucket.sortMode = sortMode
+			bucket.binOf = make([]int32, 4*insertionSortMaxTris)
+			bucket.sortedTris = make([]sortingTriangle, 4*insertionSortMaxTris)
+
+			for triCount := 0; triCount <= 4*insertionSortMaxTris; triCount++ {
+
+				// Few distinct depths give many equal keys; some fall outside the range.
+				for _, distinct := range []int{1, 3, 40, 1 << 20} {
+
+					for i := range triCount {
+						depth := float32(random.Intn(distinct))/float32(distinct)*40 - 5
+						bucket.AddTriangle(i, depth)
+					}
+
+					bucket.countingSort(triCount, 0, 30)
+					want := append([]sortingTriangle{}, bucket.sorted...)
+
+					bucket.insertionSort(triCount, 0, 30)
+
+					if len(bucket.sorted) != len(want) {
+						t.Fatalf("bins %d, mode %d, %d triangles: %d sorted", binCount, sortMode, triCount, len(bucket.sorted))
+					}
+
+					for i := range want {
+						if bucket.sorted[i] != want[i] {
+							t.Fatalf("bins %d, mode %d, %d triangles: triangle %d is %d, want %d", binCount, sortMode, triCount, i, bucket.sorted[i].index, want[i].index)
+						}
+					}
+
+					bucket.Clear()
+
+				}
 
 			}
 
