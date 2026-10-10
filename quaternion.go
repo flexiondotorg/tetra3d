@@ -135,51 +135,17 @@ func (q1 Quaternion) Mult(q2 Quaternion) Quaternion {
 func (quat Quaternion) ToMatrix4() Matrix4 {
 
 	// See this page for where this formula comes from: https://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToMatrix/jay.htm
+	// Each entry is the sum of the product of the two matrices of that page, with the same terms in the same order,
+	// so that the result has the same bits as that product.
 
-	m1 := NewMatrix4()
-	m1[0][0] = quat.W
-	m1[0][1] = quat.Z
-	m1[0][2] = -quat.Y
-	m1[0][3] = quat.X
+	w, x, y, z := quat.W, quat.X, quat.Y, quat.Z
 
-	m1[1][0] = -quat.Z
-	m1[1][1] = quat.W
-	m1[1][2] = quat.X
-	m1[1][3] = quat.Y
-
-	m1[2][0] = quat.Y
-	m1[2][1] = -quat.X
-	m1[2][2] = quat.W
-	m1[2][3] = quat.Z
-
-	m1[3][0] = -quat.X
-	m1[3][1] = -quat.Y
-	m1[3][2] = -quat.Z
-	m1[3][3] = quat.W
-
-	m2 := NewMatrix4()
-
-	m2[0][0] = quat.W
-	m2[0][1] = quat.Z
-	m2[0][2] = -quat.Y
-	m2[0][3] = -quat.X
-
-	m2[1][0] = -quat.Z
-	m2[1][1] = quat.W
-	m2[1][2] = quat.X
-	m2[1][3] = -quat.Y
-
-	m2[2][0] = quat.Y
-	m2[2][1] = -quat.X
-	m2[2][2] = quat.W
-	m2[2][3] = -quat.Z
-
-	m2[3][0] = quat.X
-	m2[3][1] = quat.Y
-	m2[3][2] = quat.Z
-	m2[3][3] = quat.W
-
-	return m1.Mult(m2)
+	return Matrix4{
+		{w*w + z*-z + -y*y + x*x, w*z + z*w + -y*-x + x*y, w*-y + z*x + -y*w + x*z, w*-x + z*-y + -y*-z + x*w},
+		{-z*w + w*-z + x*y + y*x, -z*z + w*w + x*-x + y*y, -z*-y + w*x + x*w + y*z, -z*-x + w*-y + x*-z + y*w},
+		{y*w + -x*-z + w*y + z*x, y*z + -x*w + w*-x + z*y, y*-y + -x*x + w*w + z*z, y*-x + -x*-y + w*-z + z*w},
+		{-x*w + -y*-z + -z*y + w*x, -x*z + -y*w + -z*-x + w*y, -x*-y + -y*x + -z*w + w*z, -x*-x + -y*-y + -z*-z + w*w},
+	}
 }
 
 // RotateVec rotates the given vector around using the Quaternion counter-clockwise.

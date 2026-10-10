@@ -95,6 +95,40 @@ func NewMatrix4Scale(x, y, z float32) Matrix4 {
 	return mat
 }
 
+// newMatrix4TRS returns NewMatrix4Scale(scale).Mult(rotation).Mult(NewMatrix4Translate(position)) without the two
+// matrix products. For finite values, it returns the same bits: a product with a zero entry of the scale or
+// translation matrix adds a signed zero, and plusZeros adds those zeros only where they can change the sum.
+func newMatrix4TRS(position Vector3, rotation Matrix4, scale Vector3) Matrix4 {
+	r := &rotation
+	var sr Matrix4
+	for j := range 4 {
+		sr[0][j] = plusZeros(scale.X*r[0][j], r[1][j], r[2][j], r[3][j])
+		// The leading zero products keep the first terms of the matrix product, so that a fused multiply-add rounds
+		// as there.
+		sr[1][j] = plusZeros(0*r[0][j]+scale.Y*r[1][j], r[2][j], r[3][j], r[3][j])
+		sr[2][j] = plusZeros(0*r[0][j]+0*r[1][j]+scale.Z*r[2][j], r[3][j], r[3][j], r[3][j])
+		sr[3][j] = plusZeros(r[3][j], r[0][j], r[1][j], r[2][j])
+	}
+	var out Matrix4
+	for i := range 4 {
+		a := &sr[i]
+		// A repeated zero product does not change the sum, so the two-zero sums pass one entry twice.
+		out[i][0] = plusZeros(a[0], a[1], a[2], a[2]) + a[3]*position.X
+		out[i][1] = plusZeros(a[1], a[0], a[2], a[2]) + a[3]*position.Y
+		out[i][2] = plusZeros(a[2], a[0], a[1], a[1]) + a[3]*position.Z
+		out[i][3] = plusZeros(a[3], a[0], a[1], a[2])
+	}
+	return out
+}
+
+// plusZeros returns p + 0*a + 0*b + 0*c. The zero products change the sum only when p is a zero.
+func plusZeros(p, a, b, c float32) float32 {
+	if p != 0 {
+		return p
+	}
+	return p + 0*a + 0*b + 0*c
+}
+
 // NewMatrix4Rotate returns a new Matrix4 designed to rotate by the angle given (in radians) along the axis given [x, y, z].
 // This rotation works as though you pierced the object utilizing the matrix through by the axis, and then rotated it
 // counter-clockwise by the angle in radians.
