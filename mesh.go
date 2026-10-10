@@ -395,13 +395,20 @@ func (mesh *Mesh) Clone() *Mesh {
 	// }
 
 	newMesh.Triangles = make([]*Triangle, 0, len(mesh.Triangles))
+	block := make([]Triangle, len(mesh.Triangles))
 
 	for _, part := range mesh.MeshParts {
 		newPart := part.Clone()
 
 		newPart.ForEachTri(
 			func(tri *Triangle) {
-				newTri := tri.Clone()
+				var newTri *Triangle
+				if i := len(newMesh.Triangles); i < len(block) {
+					newTri = &block[i]
+				} else {
+					newTri = &Triangle{}
+				}
+				tri.cloneInto(newTri)
 				newTri.MeshPart = newPart
 				newMesh.Triangles = append(newMesh.Triangles, newTri)
 			},
@@ -1773,12 +1780,24 @@ func NewTriangle(meshPart *MeshPart, indices ...int) *Triangle {
 
 // Clone clones the Triangle, keeping a reference to the same Material.
 func (tri *Triangle) Clone() *Triangle {
-	newTri := NewTriangle(tri.MeshPart, tri.VertexIndexA, tri.VertexIndexB, tri.VertexIndexC)
-	newTri.id = tri.id
-	newTri.MaxSpan = tri.MaxSpan
-	newTri.Center = tri.Center
-	newTri.Normal = tri.Normal
-	newTri.MeshPart = tri.MeshPart
+	newTri := &Triangle{}
+	tri.cloneInto(newTri)
+	return newTri
+}
+
+// cloneInto writes a clone of tri into newTri.
+func (tri *Triangle) cloneInto(newTri *Triangle) {
+	*newTri = Triangle{
+		VertexIndexA: tri.VertexIndexA,
+		VertexIndexB: tri.VertexIndexB,
+		VertexIndexC: tri.VertexIndexC,
+		id:           tri.id,
+		MaxSpan:      tri.MaxSpan,
+		Center:       tri.Center,
+		Normal:       tri.Normal,
+		MeshPart:     tri.MeshPart,
+		visible:      tri.visible,
+	}
 	if levels := tri.subdivisionLevels(); levels != nil {
 		newLevels := make([][]*Triangle, len(levels))
 		for level := range levels {
@@ -1786,8 +1805,6 @@ func (tri *Triangle) Clone() *Triangle {
 		}
 		newTri.subdivisions = &newLevels
 	}
-	newTri.visible = tri.visible
-	return newTri
 }
 
 // ID returns the ID of the triangle in the Mesh, with 1 being the first available ID.
@@ -2053,42 +2070,6 @@ func (tri *Triangle) RecalculateCenter() {
 		mesh.triCenters[i] = tri.Center
 	}
 
-	// Determine the maximum span of the triangle; this is done for bounds checking, since we can reject triangles early if we
-	// can easily tell we're too far away from them.
-	dim := Dimensions{
-		Min: Vector3{math32.MaxFloat32, math32.MaxFloat32, math32.MaxFloat32},
-		Max: Vector3{-math32.MaxFloat32, -math32.MaxFloat32, -math32.MaxFloat32},
-	}
-
-	for i := 0; i < 3; i++ {
-
-		if dim.Min.X > verts[tri.VertexIndex(i)].X {
-			dim.Min.X = verts[tri.VertexIndex(i)].X
-		}
-
-		if dim.Min.Y > verts[tri.VertexIndex(i)].Y {
-			dim.Min.Y = verts[tri.VertexIndex(i)].Y
-		}
-
-		if dim.Min.Z > verts[tri.VertexIndex(i)].Z {
-			dim.Min.Z = verts[tri.VertexIndex(i)].Z
-		}
-
-		if dim.Max.X < verts[tri.VertexIndex(i)].X {
-			dim.Max.X = verts[tri.VertexIndex(i)].X
-		}
-
-		if dim.Max.Y < verts[tri.VertexIndex(i)].Y {
-			dim.Max.Y = verts[tri.VertexIndex(i)].Y
-		}
-
-		if dim.Max.Z < verts[tri.VertexIndex(i)].Z {
-			dim.Max.Z = verts[tri.VertexIndex(i)].Z
-		}
-
-	}
-
-	// tri.MaxSpan = dim.MaxSpan()
 	tri.MaxSpan = max(
 		verts[tri.VertexIndexA].Sub(verts[tri.VertexIndexB]).Magnitude(),
 		verts[tri.VertexIndexB].Sub(verts[tri.VertexIndexC]).Magnitude(),
@@ -2413,6 +2394,11 @@ func (part *MeshPart) AddTriangles(indices ...int) {
 	// 	}
 	// }
 
+	// One block holds the new triangles, so that a load makes one allocation
+	// for them in place of one for each triangle.
+	block := make([]Triangle, len(indices)/3)
+	mesh.Triangles = slices.Grow(mesh.Triangles, len(block))
+
 	for i := 0; i < len(indices); i += 3 {
 
 		if mesh.triIndex < part.TriangleStart {
@@ -2422,7 +2408,14 @@ func (part *MeshPart) AddTriangles(indices ...int) {
 			part.TriangleEnd = mesh.triIndex
 		}
 
-		newTri := NewTriangle(part, indices[i]+part.VertexIndexStart, indices[i+1]+part.VertexIndexStart, indices[i+2]+part.VertexIndexStart)
+		newTri := &block[i/3]
+		*newTri = Triangle{
+			MeshPart:     part,
+			VertexIndexA: indices[i] + part.VertexIndexStart,
+			VertexIndexB: indices[i+1] + part.VertexIndexStart,
+			VertexIndexC: indices[i+2] + part.VertexIndexStart,
+			visible:      true,
+		}
 		newTri.id = uint32(len(mesh.Triangles) + 1)
 
 		// TODO: Replace this with an in-shader solution, as this created weird "scruggling" on larger face-numbered meshes.
