@@ -90,13 +90,24 @@ func (s *sortingTriangleBucket) Sort(minRange, maxRange float32) {
 		s.sortedTris = make([]sortingTriangle, len(s.unsetTris))
 	}
 
+	if count <= insertionSortMaxTris {
+		s.insertionSort(count, minRange, rangeDiff)
+	} else {
+		s.countingSort(count, minRange, rangeDiff)
+	}
+
+}
+
+// countingSort orders the triangles by bin in draw order, and in the order of
+// AddTriangle within a bin.
+func (s *sortingTriangleBucket) countingSort(count int, minRange, rangeDiff float32) {
+
+	binCount := s.binCount
 	starts := s.binStarts
 	clear(starts)
 
 	for i := 0; i < count; i++ {
-		depth := (s.unsetTris[i].depth - minRange) / rangeDiff * float32(binCount)
-		t := math32.Clamp(depth, 0, float32(binCount-1))
-		targetBin := int32(t)
+		targetBin := depthBin(s.unsetTris[i].depth, minRange, rangeDiff, binCount)
 		s.binOf[i] = targetBin
 		starts[targetBin]++
 	}
@@ -125,6 +136,40 @@ func (s *sortingTriangleBucket) Sort(minRange, maxRange float32) {
 
 	s.sorted = s.sortedTris[:count]
 
+}
+
+// insertionSortMaxTris is the largest triangle count that Sort orders with
+// insertionSort; above it, clearing and scanning the bins costs less.
+const insertionSortMaxTris = 48
+
+// depthBin gives the bin of a triangle at depth.
+func depthBin(depth, minRange, rangeDiff float32, binCount int) int32 {
+	t := math32.Clamp((depth-minRange)/rangeDiff*float32(binCount), 0, float32(binCount-1))
+	return int32(t)
+}
+
+// insertionSort gives the same order as countingSort.
+func (s *sortingTriangleBucket) insertionSort(count int, minRange, rangeDiff float32) {
+	tris := s.sortedTris[:count]
+	keys := s.binOf[:count]
+	binCount := s.binCount
+	last := int32(binCount - 1)
+	backToFront := s.sortMode == TriangleSortModeBackToFront
+	for i, tri := range s.unsetTris[:count] {
+		key := depthBin(tri.depth, minRange, rangeDiff, binCount)
+		if backToFront {
+			key = last - key
+		}
+		j := i
+		for j > 0 && keys[j-1] > key {
+			keys[j] = keys[j-1]
+			tris[j] = tris[j-1]
+			j--
+		}
+		keys[j] = key
+		tris[j] = tri
+	}
+	s.sorted = tris
 }
 
 // Resize sets the number of depth bins.
