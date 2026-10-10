@@ -30,3 +30,21 @@ func TestMeshColour(t *testing.T) {
 		}
 	}
 }
+
+// TestMeshColourHardware checks that meshColourHardware reads no depth image,
+// keeps no decode of it, and compiles with each vertex function of the mesh
+// path, with and without a custom fragment.
+func TestMeshColourHardware(t *testing.T) {
+	custom := "//kage:unit pixels\npackage main\n\nfunc CustomFragment(dstPos vec4, srcPos vec2, color vec4) vec4 {\n\treturn color\n}\n"
+	for _, c := range []string{"", custom} {
+		src := meshColourHardware(base3DShaderSource(c))
+		if bytes.Contains(src, []byte("imageSrc1")) || bytes.Contains(src, []byte("decodeDepth(depth)")) || bytes.Contains(src, []byte("discard()")) {
+			t.Errorf("meshColourHardware left a read of the depth image, its decode, or a discard with custom %q", c)
+		}
+		for _, with := range []func([]byte) []byte{withGPUMesh, withGPURigid, withGPUBend, withGPUPose} {
+			if _, err := ebiten.NewShader(with(src)); err != nil {
+				t.Errorf("custom %q: %v", c, err)
+			}
+		}
+	}
+}

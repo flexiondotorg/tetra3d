@@ -10,8 +10,8 @@ package tetra3d
 // the CPU transform, and the factor of the clip z: the clip z is
 // k * (w - near). So a point at the near plane has a clip z of 0, and one at
 // the far plane has a clip z of w, the clip range of every graphics
-// library. OpenGL keeps a clip z down to -w, so it clips at about half the
-// near distance.
+// library, and a depth from 0 to 1, as the Ebitengine fork maps the clip z of
+// a vertex function on OpenGL too.
 type gpuClip struct {
 	near, far, k float32
 }
