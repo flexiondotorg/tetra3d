@@ -2,14 +2,14 @@
 
 This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the game Five Horizons. The readme of the upstream project is `readme.md`.
 
-- Upstream base: commit `18407def647e46ecd6d727079798ddffa68874ee` on `main`, the merge of pull request #46. It is the former base `6c1461c8f559d336e5fdadfb658f64f2a9dce453` plus our 14 commits (T01 to T14) and 8 merge commits, and nothing else. The set of T01 to T14 is now upstream, so this branch no longer carries it.
-- Branch: `fivehorizons`, one commit for each patch, 42 patches on the upstream base, one `build` commit for the Ebitengine pin, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
-- Planned tag: `fivehorizons-3`, for the first set on the base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the former base `6c1461c`.
+- Upstream base: commit `005dd7111b83b3455b228d0632721ea1bcdf2909` on `main`, the merge of pull request #49. It is the former base `18407def647e46ecd6d727079798ddffa68874ee` plus the upstream commits of T37, T38, T40, T41, T45, and T50, their 3 merge commits, and one commit of the maintainer, `487e3d5` "More changes!". The set of T37, T38, T40, T41, T45, and T50 is now upstream, so this branch no longer carries it.
+- Branch: `fivehorizons`, one commit for each patch, 36 patches on the upstream base, one `build` commit for the Ebitengine pin, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
+- Tags: `fivehorizons-3` is the first set on the former base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the base before it, `6c1461c`. The tag `pre-rebase-005dd71` keeps the former tip `6d78389`, which the game pins until the next freeze.
 - Licence: see `LICENSE`, unchanged from upstream.
 
 ## Upstream status
 
-Upstream merged eight of our pull requests. Each has a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours. Three pull requests of ours are open, see "Open pull requests".
+Upstream merged eleven of our pull requests. The first eight each have a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours. No pull request of ours is open.
 
 | Patches | Pull request |
 | --- | --- |
@@ -21,18 +21,13 @@ Upstream merged eight of our pull requests. Each has a thank-you comment and no 
 | T08, the atomic ID counters (A4) | #44 |
 | T09, an error for invalid glTF vertex data (A5) | #45, which says `Fixes #19` |
 | T10 to T14, the allocations of the render loop (B) | #46 |
+| T37, T38, T40, T41, the deprecated API | #47, merged on 2026-10-14 |
+| T45, the fog skip | #48, merged on 2026-10-14 |
+| T50, an error for an invalid glTF texture index | #49, which says `Fixes #18`, merged on 2026-10-14 |
 
-T06 and T08 upstream differ from the old fork commits only by our own amendments. The patches T01 to T14 are dropped from this branch because the base has them.
+T06 and T08 upstream differ from the old fork commits only by our own amendments. The patches T01 to T14, T37, T38, T40, T41, T45, and T50 are dropped from this branch because the base has them.
 
-### Open pull requests
-
-| Patches | Pull request |
-| --- | --- |
-| T37, T38, T40, T41, the deprecated API | #47 |
-| T45, the fog skip | #48 |
-| T50, an error for an invalid glTF texture index | #49, which says `Fixes #18` |
-
-T50 is the upstream commit of #49, with the same message and patch ID. It drops from this branch at the next rebase once #49 merges.
+The upstream form of T37 uses `resultDepthTexture` where this branch uses `ownDepthTexture` of T25. The upstream form of T40 has the module versions of upstream, and the upstream form of T45 adds `frame_test.go`, which T25 also adds. This branch keeps its own form of each.
 
 T45 showed no measurable change in the stock `lighting` scene on an AMD Radeon 8060S. The median ratio of patch to base frame time was 0.97 at 1920x1080 over 5 pairs and 0.9989 at 3840x2160 over 7 pairs.
 
@@ -42,7 +37,7 @@ T45 showed no measurable change in the stock `lighting` scene on an AMD Radeon 8
 2. T2 (T15 to T26): optimisations and small additions that change an API or a behaviour.
 3. T3 (T27): a fork-only patch, the opt-in vertex counter behind the `vertexcount` build tag.
 4. T4 (T28 to T36, and T47): the build patch, the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer), and the depth test inside the parts of the sorted path.
-5. After the tiers (T37 to T45, T49, and T50): the deprecated Ebitengine API (T37 to T42), the fixes for tile-based GPUs (T43 to T45), the unsorted triangle depth (T49), and the glTF texture index (T50).
+5. After the tiers (T39, T42 to T44, and T49): the deprecated Ebitengine API (T39 and T42), the fixes for tile-based GPUs (T43 and T44), and the unsorted triangle depth (T49). T37, T38, T40, T41, T45, and T50 are merged upstream and are not on this branch.
 6. The performance audit (T51 to T58), after the build commit that pins the Ebitengine fork freeze `fivehorizons-4`.
 
 Patch numbers have two digits, T01 to T58, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
@@ -51,7 +46,7 @@ T01 to T27 build against stock Ebitengine. T28 adds the `replace` line of `go.mo
 
 ## Squashed patches
 
-T46 and T48 are squashed into T47, commit `22e7e49`, because T47 builds on T46.
+T46 and T48 are squashed into T47, commit `f9ce200`, because T47 builds on T46.
 
 - T46 was the one pass of the mesh path, `Camera.GPUMeshOnePass`. The parts drew their colour once with no depth pass, and a full-screen draw resolved the hardware depth of the colour texture into the depth texture.
 - T47 is the hardware depth of the colour texture, `Camera.HardwareDepth`. `Render` draws the mesh path in one pass, runs `Camera.AfterMeshColour`, and draws each part of the sorted path once into the colour texture with the hardware depth test. Solid parts test and write the depth, alpha-clip parts also discard, and transparent parts test without a write, back to front. There is no depth texture, no `depthIntermediate`, no clear, no copy, and no resolve. It needs `DrawTrianglesShaderOptions.DepthReadOnly` and `ImageDepth` of the Ebitengine fork, which also maps the clip z of a vertex function to a depth from 0 to 1 on OpenGL.
@@ -63,63 +58,57 @@ T46 and T48 are squashed into T47, commit `22e7e49`, because T47 builds on T46.
 
 | Patch | Commit | Subject |
 | --- | --- | --- |
-| T15 | `8ccb0e8` | perf: transform each vertex once with clip codes |
-| T16 | `5fe2678` | perf: draw mesh parts with indexed vertices |
-| T17 | `bccdcf7` | perf: carry the depth in Custom1 of the colour vertices |
-| T18 | `b4c1bb6` | perf: transform the common path's vertices in one plain loop |
-| T19 | `16e8708` | perf: write the vertex lists in mesh order, each colour and UV read once |
-| T20 | `ed84f41` | perf: write the common path's vertex lists in one plain loop |
-| T21 | `bf58eda` | perf: read packed triangle indices and centres in the triangle pass |
-| T22 | `d047df6` | perf: store a triangle index in each sorting triangle |
-| T23 | `9d8ac68` | perf: size the per-vertex buffers at the vertex count, with bones only for meshes with bones |
-| T24 | `0f36e7b` | perf: pack a triangle into 80 bytes |
-| T25 | `ef5b45b` | feat: Camera.SetDepthTexture takes a depth texture of the caller |
-| T26 | `61e5536` | feat: Camera.ResetFrame starts a frame without a clear |
-| T27 | `f103465` | feat: an opt-in vertex counter hook behind the vertexcount tag |
-| T28 | `d22e712` | build: build against the Ebitengine fork |
-| T29 | `361765f` | feat: draw solid mesh batches with a hardware depth buffer |
-| T30 | `0482670` | feat: draw models on the mesh path with one record each |
-| T31 | `b48fc3c` | feat: move a mesh between two poses on the mesh path |
-| T32 | `b6b3a2c` | feat: bend a model about two joints on the mesh path |
-| T33 | `20c473b` | perf: queue the mesh batches for Render |
-| T34 | `53b45af` | perf: clear the depth run of the mesh path in the same render pass |
-| T35 | `3d1857f` | feat: test the depth inside each solid part of the sorted path |
-| T36 | `45d98c2` | perf: draw the depth of a run of solid parts before their colour |
-| T37 | `6c13ff7` | refactor: replace the deprecated Dispose and Size calls of Ebitengine |
-| T38 | `3d8324d` | refactor: stop passing the deprecated AntiAlias and FillRule to the colour pass |
-| T39 | `52eaac7` | refactor: rename the deprecated Kage builtin imageSrc1UnsafeAt |
-| T40 | `442cea0` | refactor: draw text with text/v2 in place of the deprecated text package |
-| T41 | `131eb92` | refactor: replace the deprecated Ebitengine API in the examples |
-| T42 | `113ad85` | refactor: keep the deprecated Ebitengine option fields out of the public API |
-| T43 | `9eba9b1` | perf: return a transparent pixel in place of a discard in the mesh colour pass |
-| T44 | `6152e6c` | perf: add GPUMeshDirectDepth to draw the mesh depth pass into the depth texture |
-| T45 | `c0f46c4` | perf: skip the fog work of the colour shader when the fog is off |
-| T47 | `22e7e49` | perf: add HardwareDepth to draw the sorted path with the hardware depth test |
-| T49 | `a13af42` | perf: skip the triangle depth of a part that draws unsorted |
-| T50 | `366d6cb` | fix: return an error for an invalid glTF texture index |
-| T51 | `1948ebf` | perf: convert vertex colours to sRGB with a lookup table |
-| T52 | `38dffbf` | perf: allocate the triangles of a mesh in one block |
-| T53 | `5b54a71` | perf: compile the camera shaders once for all cameras |
-| T54 | `8a8df17` | perf: build the local transform of a node in closed form |
-| T55 | `b4a115d` | perf: stop the dirty walk at a node that is already dirty |
-| T56 | `c1caae3` | perf: compute the inverse and the decomposition of a part only when used |
-| T57 | `722b4a9` | perf: sort the triangles of a small part with an insertion sort |
-| T58 | `5b1fbcb` | perf: merge identical vertices of a GPU mesh |
+| T15 | `586af10` | perf: transform each vertex once with clip codes |
+| T16 | `70f3199` | perf: draw mesh parts with indexed vertices |
+| T17 | `1dd7914` | perf: carry the depth in Custom1 of the colour vertices |
+| T18 | `faafbac` | perf: transform the common path's vertices in one plain loop |
+| T19 | `18215fd` | perf: write the vertex lists in mesh order, each colour and UV read once |
+| T20 | `a575706` | perf: write the common path's vertex lists in one plain loop |
+| T21 | `1439582` | perf: read packed triangle indices and centres in the triangle pass |
+| T22 | `0bcf429` | perf: store a triangle index in each sorting triangle |
+| T23 | `a255743` | perf: size the per-vertex buffers at the vertex count, with bones only for meshes with bones |
+| T24 | `6e6c8de` | perf: pack a triangle into 80 bytes |
+| T25 | `2366f22` | feat: Camera.SetDepthTexture takes a depth texture of the caller |
+| T26 | `1194d32` | feat: Camera.ResetFrame starts a frame without a clear |
+| T27 | `6b7713b` | feat: an opt-in vertex counter hook behind the vertexcount tag |
+| T28 | `37e16d9` | build: build against the Ebitengine fork |
+| T29 | `ceb5ae2` | feat: draw solid mesh batches with a hardware depth buffer |
+| T30 | `791e407` | feat: draw models on the mesh path with one record each |
+| T31 | `6f664ef` | feat: move a mesh between two poses on the mesh path |
+| T32 | `493deb6` | feat: bend a model about two joints on the mesh path |
+| T33 | `cb7de21` | perf: queue the mesh batches for Render |
+| T34 | `76e263b` | perf: clear the depth run of the mesh path in the same render pass |
+| T35 | `d6a9dbf` | feat: test the depth inside each solid part of the sorted path |
+| T36 | `147ad19` | perf: draw the depth of a run of solid parts before their colour |
+| T39 | `214ed32` | refactor: rename the deprecated Kage builtin imageSrc1UnsafeAt |
+| T42 | `6ecd558` | refactor: keep the deprecated Ebitengine option fields out of the public API |
+| T43 | `23f359b` | perf: return a transparent pixel in place of a discard in the mesh colour pass |
+| T44 | `e047498` | perf: add GPUMeshDirectDepth to draw the mesh depth pass into the depth texture |
+| T47 | `f9ce200` | perf: add HardwareDepth to draw the sorted path with the hardware depth test |
+| T49 | `a7b9e67` | perf: skip the triangle depth of a part that draws unsorted |
+| T51 | `f4dfbb0` | perf: convert vertex colours to sRGB with a lookup table |
+| T52 | `71934d5` | perf: allocate the triangles of a mesh in one block |
+| T53 | `d234c46` | perf: compile the camera shaders once for all cameras |
+| T54 | `d3f3d61` | perf: build the local transform of a node in closed form |
+| T55 | `4a62150` | perf: stop the dirty walk at a node that is already dirty |
+| T56 | `9f1292d` | perf: compute the inverse and the decomposition of a part only when used |
+| T57 | `b8eaa4e` | perf: sort the triangles of a small part with an insertion sort |
+| T58 | `88e13f5` | perf: merge identical vertices of a GPU mesh |
 
-T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `be26653` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path.
+T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `6382f3d` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path.
 
 T49 skips the depth of each triangle when the part draws its triangles unsorted: a part with the sort mode `TriangleSortModeNone`, which includes every solid part under the depth test, needs no distance from the camera, so `processVertices` no longer reads the triangle centres or computes the distance for it. On the CPU processing path of Five Horizons at 2150 m, the flat time of `processVertices` falls by about a quarter.
 
 ## Plan for the remaining upstream offers
 
-Pace: one or two pull requests at a time. The maintainer discussed the method of these patches with Martin on Discord and merged all eight pull requests.
+Pace: one or two pull requests at a time. The maintainer discussed the method of these patches with Martin on Discord and merged all eleven pull requests.
 
 | Wave | Patches | Offer | Issue first | Before sending |
 | --- | --- | --- | --- | --- |
-| 1 | T45, the fog skip | One pull request | No | Sent as #48, open. |
-| 1 | T37, T38, T40, T41, the deprecated API | One pull request | No | Sent as #47, open. |
-| 1 | T50, the glTF texture index | One pull request | No | Sent as #49, open. |
-| 1 | T49, the unsorted triangle depth | One pull request | No | Try it on `18407de` alone. Measure it alone with the stock scene. |
+| 1 | T45, the fog skip | One pull request | No | Done: merged as #48. |
+| 1 | T37, T38, T40, T41, the deprecated API | One pull request | No | Done: merged as #47. |
+| 1 | T50, the glTF texture index | One pull request | No | Done: merged as #49. |
+| 2 | T49, the unsorted triangle depth | One pull request after T21 and T22 | No | It waits for T21 and T22. Then measure it alone with the stock scene. |
 | 2 | T15 to T20, the vertex pass and the indexed output | An issue, then a series of pull requests | Yes | Ask the maintainer about indexed rendering, which upstream tried before, and about the `uint16` index cap. |
 | 2 | T21 to T24, the packed triangles | A pull request after T15 to T20 | Yes | It adds `Mesh.UpdateTriangleData()`. `VertexBones` and `VertexWeights` are empty for a mesh without bones. |
 | 2 | T25 and T26, `SetDepthTexture` and `ResetFrame` | One pull request | Yes | The API is public. It is independent now that B is upstream. |
