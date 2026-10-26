@@ -9,7 +9,7 @@ This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the
 
 ## Upstream status
 
-Upstream merged eleven of our pull requests. The first eight each have a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours. No pull request of ours is open.
+Upstream merged eleven of our pull requests. The first eight each have a thank-you comment and no review. The issues #37, #39, #19, and #34 are closed. #34 is not ours. One pull request of ours is open, #51, and its issue #50 is open.
 
 | Patches | Pull request |
 | --- | --- |
@@ -30,6 +30,16 @@ T06 and T08 upstream differ from the old fork commits only by our own amendments
 The upstream form of T37 uses `resultDepthTexture` where this branch uses `ownDepthTexture` of T25. The upstream form of T40 has the module versions of upstream, and the upstream form of T45 adds `frame_test.go`, which T25 also adds. This branch keeps its own form of each.
 
 T45 showed no measurable change in the stock `lighting` scene on an AMD Radeon 8060S. The median ratio of patch to base frame time was 0.97 at 1920x1080 over 5 pairs and 0.9989 at 3840x2160 over 7 pairs.
+
+### Open pull requests
+
+| Patches | Pull request | State |
+| --- | --- | --- |
+| T15 and T18, the vertex pass with clip codes and a plain loop | #51, branch `vertex-pass-clip-codes` at `00b674c` on base `005dd71` | Open and ready for review since 2026-10-15, with no comment and no review |
+
+Issue #50, "Proposal: a vertex pass and indexed output for faster CPU rendering", opened on 2026-10-15, covers T15 to T24 and T49 after T21 and T22. It is open, with no comment.
+
+Pull request #51 opened as a draft and became ready for review on 2026-10-15. On the stock example scenes the gain was not significant over 9 rounds, because the examples have few vertices. The pull request states the game figure of about 2 ms a frame, which is about 120 ms each second at 60 fps.
 
 ## Patch order
 
@@ -109,7 +119,7 @@ Pace: one or two pull requests at a time. The maintainer discussed the method of
 | 1 | T37, T38, T40, T41, the deprecated API | One pull request | No | Done: merged as #47. |
 | 1 | T50, the glTF texture index | One pull request | No | Done: merged as #49. |
 | 2 | T49, the unsorted triangle depth | One pull request after T21 and T22 | No | It waits for T21 and T22. Then measure it alone with the stock scene. |
-| 2 | T15 to T20, the vertex pass and the indexed output | An issue, then a series of pull requests | Yes | Ask the maintainer about indexed rendering, which upstream tried before, and about the `uint16` index cap. |
+| 2 | T15 to T20, the vertex pass and the indexed output | An issue, then a series of pull requests | Yes | Issue sent as #50. First pull request #51 with T15 and T18 is open. |
 | 2 | T21 to T24, the packed triangles | A pull request after T15 to T20 | Yes | It adds `Mesh.UpdateTriangleData()`. `VertexBones` and `VertexWeights` are empty for a mesh without bones. |
 | 2 | T25 and T26, `SetDepthTexture` and `ResetFrame` | One pull request | Yes | The API is public. It is independent now that B is upstream. |
 | Hold | T39, the Kage rename | After upstream moves to Ebitengine v2.10 | A proposal to bump | Upstream is on v2.9.7. |
