@@ -3,8 +3,8 @@
 This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the game Five Horizons. The readme of the upstream project is `readme.md`.
 
 - Upstream base: commit `005dd7111b83b3455b228d0632721ea1bcdf2909` on `main`, the merge of pull request #49. It is the former base `18407def647e46ecd6d727079798ddffa68874ee` plus the upstream commits of T37, T38, T40, T41, T45, and T50, their 3 merge commits, and one commit of the maintainer, `487e3d5` "More changes!". The set of T37, T38, T40, T41, T45, and T50 is now upstream, so this branch no longer carries it.
-- Branch: `fivehorizons`, one commit for each patch, 36 patches on the upstream base, one `build` commit for the Ebitengine pin, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
-- Tags: `fivehorizons-3` is the first set on the former base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the base before it, `6c1461c`. The tag `pre-rebase-005dd71` keeps the former tip `6d78389`, which the game pins until the next freeze.
+- Branch: `fivehorizons`, one commit for each patch, 36 patches on the upstream base, two `build` commits for the Ebitengine pins, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
+- Tags: `fivehorizons-4` is the first set on the base `005dd71`. `fivehorizons-5` adds build commit `901da3a`, which pins the Ebitengine fork freeze `fivehorizons-5`. `fivehorizons-3` is the first set on the former base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the base before it, `6c1461c`. The tag `pre-rebase-005dd71` keeps the former tip `6d78389`, which the game pins until the next freeze.
 - Licence: see `LICENSE`, unchanged from upstream.
 
 ## Upstream status
@@ -49,6 +49,7 @@ Pull request #51 opened as a draft and became ready for review on 2026-10-15. On
 4. T4 (T28 to T36, and T47): the build patch, the mesh path (GPU-resident meshes, instanced draws, and a hardware depth buffer), and the depth test inside the parts of the sorted path.
 5. After the tiers (T39, T42 to T44, and T49): the deprecated Ebitengine API (T39 and T42), the fixes for tile-based GPUs (T43 and T44), and the unsorted triangle depth (T49). T37, T38, T40, T41, T45, and T50 are merged upstream and are not on this branch.
 6. The performance audit (T51 to T58), after the build commit that pins the Ebitengine fork freeze `fivehorizons-4`.
+7. The build commit `901da3a`, which pins the Ebitengine fork freeze `fivehorizons-5`.
 
 Patch numbers have two digits, T01 to T58, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
 
@@ -105,7 +106,7 @@ T46 and T48 are squashed into T47, commit `f9ce200`, because T47 builds on T46.
 | T57 | `b8eaa4e` | perf: sort the triangles of a small part with an insertion sort |
 | T58 | `88e13f5` | perf: merge identical vertices of a GPU mesh |
 
-T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `6382f3d` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path.
+T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `6382f3d` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path. Build commit `901da3a` comes after T58 and pins the Ebitengine fork freeze `fivehorizons-5`, commit `5d80ed8`.
 
 T49 skips the depth of each triangle when the part draws its triangles unsorted: a part with the sort mode `TriangleSortModeNone`, which includes every solid part under the depth test, needs no distance from the camera, so `processVertices` no longer reads the triangle centres or computes the distance for it. On the CPU processing path of Five Horizons at 2150 m, the flat time of `processVertices` falls by about a quarter.
 
