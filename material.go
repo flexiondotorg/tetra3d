@@ -125,6 +125,13 @@ type Material struct {
 	// all non-transparent materials.
 	TransparencyMode int
 
+	// DepthWrite makes a transparent part write the hardware depth of the
+	// camera, see Camera.HardwareDepth, as a solid part does. A depth
+	// pre-pass uses it: a copy of a model with ebiten.BlendDestination, which
+	// draws no colour, and a lower RenderOrder than the parts of its colour,
+	// so that only the nearest surface of the model blends.
+	DepthWrite bool
+
 	BillboardedDepthMode int // What depth mode to use for writing depth for this material
 	LightingMode         int // How materials are lit
 
@@ -221,6 +228,7 @@ func (m *Material) Clone() *Material {
 	}
 
 	newMat.TransparencyMode = m.TransparencyMode
+	newMat.DepthWrite = m.DepthWrite
 	newMat.BillboardedDepthMode = m.BillboardedDepthMode
 	newMat.LightingMode = m.LightingMode
 
