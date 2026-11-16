@@ -2307,10 +2307,11 @@ func (camera *Camera) Render(scene *Scene, lights, models NodeIterator) {
 
 		if hardware {
 			// The part tests the hardware depth of the colour texture, and a
-			// transparent part writes none, see HardwareDepth.
+			// transparent part writes none unless its material has DepthWrite,
+			// see HardwareDepth.
 			colorPassShaderOptions.Images[1] = nil
 			colorPassShaderOptions.Depth = true
-			colorPassShaderOptions.DepthReadOnly = rp.Model.isTransparent(rp.MeshPart)
+			colorPassShaderOptions.DepthReadOnly = rp.Model.isTransparent(rp.MeshPart) && (mat == nil || !mat.DepthWrite)
 			// The alpha clip of clipAlphaShader.
 			draw.alphaClip[0] = 0
 			if mat != nil && mat.TransparencyMode == TransparencyModeAlphaClip {

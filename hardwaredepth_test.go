@@ -123,3 +123,75 @@ func TestHardwareDepth(t *testing.T) {
 		t.Errorf("%d colour pixels differ of %d drawn, want at most %d", colourDiff, drawn, drawn/50)
 	}
 }
+
+// TestDepthWrite draws a see-through cube with its back faces, after a
+// depth copy of it: the same mesh with ebiten.BlendDestination, DepthWrite,
+// and a lower RenderOrder. With DepthWrite, only the front faces blend, so
+// the picture matches the cube with back-face culling. Without it, the back
+// faces blend too. It also checks that Clone copies DepthWrite.
+func TestDepthWrite(t *testing.T) {
+	var supported bool
+	inFrame(t, func() { supported = ebiten.IsMeshDrawingSupported() && ebiten.IsDepthSourceSupported() })
+	if !supported {
+		t.Skip("the graphics driver cannot draw meshes or read a depth buffer")
+	}
+	render := func(culling, copied, depthWrite bool) []byte {
+		scene := NewScene("depth write")
+		scene.World.LightingOn = false
+		scene.World.FogOn = false
+		glass := NewModel("glass", NewCubeMesh(2, 2, 2))
+		glass.SetLocalPosition(0, 0, -5)
+		glass.SetLocalRotation(NewMatrix4Rotate(1, 1, 0, 0.6))
+		mat := glass.mesh.MeshParts[0].Material
+		mat.Color = NewColor4(0, 0, 1, 0.5)
+		mat.Shadeless = true
+		mat.BackfaceCulling = culling
+		mat.TransparencyMode = TransparencyModeTransparent
+		mat.TriangleSortMode = TriangleSortModeNone
+		scene.Root.AddChildren(glass)
+		if copied {
+			depth := mat.Clone()
+			depth.Blend = ebiten.BlendDestination
+			depth.DepthWrite = depthWrite
+			depth.RenderOrder = mat.RenderOrder - 1
+			if depth.Clone().DepthWrite != depthWrite {
+				t.Errorf("Clone does not copy DepthWrite")
+			}
+			m := glass.mesh.Clone()
+			m.MeshParts[0].Material = depth
+			pre := NewModel("glass-depth", m)
+			pre.SetLocalPosition(0, 0, -5)
+			pre.SetLocalRotation(NewMatrix4Rotate(1, 1, 0, 0.6))
+			scene.Root.AddChildren(pre)
+		}
+		cam := NewCamera("camera", 64, 64)
+		cam.GPUMesh, cam.HardwareDepth = true, true
+		scene.Root.AddChildren(cam)
+		pix := make([]byte, 4*64*64)
+		inFrame(t, func() {
+			cam.Clear()
+			cam.RenderScene(scene)
+			cam.ColorTexture().ReadPixels(pix)
+		})
+		return pix
+	}
+	front := render(true, false, false)
+	differ := func(a, b []byte) int {
+		n := 0
+		for i := 0; i < len(a); i += 4 {
+			for ch := range 4 {
+				if d := int(a[i+ch]) - int(b[i+ch]); d < -1 || d > 1 {
+					n++
+					break
+				}
+			}
+		}
+		return n
+	}
+	if n := differ(render(false, true, true), front); n > 0 {
+		t.Errorf("with a depth copy and DepthWrite, %d pixels differ from the front faces alone", n)
+	}
+	if n := differ(render(false, true, false), front); n < 100 {
+		t.Errorf("without DepthWrite, %d pixels differ from the front faces alone, want the back faces to show", n)
+	}
+}
