@@ -3,8 +3,8 @@
 This branch is a fork of [Tetra3D](https://github.com/SolarLune/tetra3d) for the game Five Horizons. The readme of the upstream project is `readme.md`.
 
 - Upstream base: commit `005dd7111b83b3455b228d0632721ea1bcdf2909` on `main`, the merge of pull request #49. It is the former base `18407def647e46ecd6d727079798ddffa68874ee` plus the upstream commits of T37, T38, T40, T41, T45, and T50, their 3 merge commits, and one commit of the maintainer, `487e3d5` "More changes!". The set of T37, T38, T40, T41, T45, and T50 is now upstream, so this branch no longer carries it.
-- Branch: `fivehorizons`, one commit for each patch, 36 patches on the upstream base, two `build` commits for the Ebitengine pins, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
-- Tags: `fivehorizons-4` is the first set on the base `005dd71`. `fivehorizons-5` adds build commit `901da3a`, which pins the Ebitengine fork freeze `fivehorizons-5`. `fivehorizons-3` is the first set on the former base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the base before it, `6c1461c`. The tag `pre-rebase-005dd71` keeps the former tip `6d78389`, which the game pins until the next freeze.
+- Branch: `fivehorizons`, one commit for each patch, 37 patches on the upstream base, two `build` commits for the Ebitengine pins, and the `docs` commits that update this note. A rebase rewrites the branch. Each freeze is a tag.
+- Tags: `fivehorizons-4` is the first set on the base `005dd71`. `fivehorizons-5` adds build commit `901da3a`, which pins the Ebitengine fork freeze `fivehorizons-5`. `fivehorizons-6` adds T59. `fivehorizons-3` is the first set on the former base `18407de`. The tags `fivehorizons-1` and `fivehorizons-2` stay on the base before it, `6c1461c`. The tag `pre-rebase-005dd71` keeps the former tip `6d78389`, which the game pins until the next freeze.
 - Licence: see `LICENSE`, unchanged from upstream.
 
 ## Upstream status
@@ -50,8 +50,9 @@ Pull request #51 opened as a draft and became ready for review on 2026-10-15. On
 5. After the tiers (T39, T42 to T44, and T49): the deprecated Ebitengine API (T39 and T42), the fixes for tile-based GPUs (T43 and T44), and the unsorted triangle depth (T49). T37, T38, T40, T41, T45, and T50 are merged upstream and are not on this branch.
 6. The performance audit (T51 to T58), after the build commit that pins the Ebitengine fork freeze `fivehorizons-4`.
 7. The build commit `901da3a`, which pins the Ebitengine fork freeze `fivehorizons-5`.
+8. T59, the depth write of a transparent part, for the ghost car of the game.
 
-Patch numbers have two digits, T01 to T58, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
+Patch numbers have two digits, T01 to T59, and each number stays fixed. T46 and T48 are retired numbers with no commit of their own, see "Squashed patches". Tiers have one digit, T0 to T4.
 
 T01 to T27 build against stock Ebitengine. T28 adds the `replace` line of `go.mod` for the Ebitengine fork [`flexiondotorg/ebiten`](https://github.com/flexiondotorg/ebiten), branch `fivehorizons`, and the patches after it build against the fork. T29 to T36, T43, T44, and T47 need it, and T27 is a diagnostic.
 
@@ -105,10 +106,13 @@ T46 and T48 are squashed into T47, commit `f9ce200`, because T47 builds on T46.
 | T56 | `9f1292d` | perf: compute the inverse and the decomposition of a part only when used |
 | T57 | `b8eaa4e` | perf: sort the triangles of a small part with an insertion sort |
 | T58 | `88e13f5` | perf: merge identical vertices of a GPU mesh |
+| T59 | `2f42bed` | feat: add Material.DepthWrite for a depth pre-pass of a transparent part |
 
 T51 to T58 come from the performance audit of 2026-10-10. Each commit message gives its measurement. Build commit `6382f3d` comes before them and pins the Ebitengine fork freeze `fivehorizons-4`. T51 to T57 can go upstream, and T53 needs a version without the shader variants of the fork. T58 is fork only, because it changes the mesh path. Build commit `901da3a` comes after T58 and pins the Ebitengine fork freeze `fivehorizons-5`, commit `5d80ed8`.
 
 T49 skips the depth of each triangle when the part draws its triangles unsorted: a part with the sort mode `TriangleSortModeNone`, which includes every solid part under the depth test, needs no distance from the camera, so `processVertices` no longer reads the triangle centres or computes the distance for it. On the CPU processing path of Five Horizons at 2150 m, the flat time of `processVertices` falls by about a quarter.
+
+T59 adds `Material.DepthWrite`. On the hardware depth path of T47, a transparent part writes no depth. With `DepthWrite`, it tests and writes the depth as a solid part does, and it keeps its blend and its place in the transparent pass. A depth pre-pass uses it: a copy of a model with `ebiten.BlendDestination`, which draws no colour, and a lower `RenderOrder` than the colour parts, so that only the nearest surface of the model blends. `Clone` copies the field. `TestDepthWrite` checks the picture against the front faces alone. The game uses it for the ghost car and for the AI rival when it fades. T59 is fork only, because it needs `HardwareDepth`.
 
 ## Plan for the remaining upstream offers
 
@@ -125,6 +129,6 @@ Pace: one or two pull requests at a time. The maintainer discussed the method of
 | 2 | T25 and T26, `SetDepthTexture` and `ResetFrame` | One pull request | Yes | The API is public. It is independent now that B is upstream. |
 | Hold | T39, the Kage rename | After upstream moves to Ebitengine v2.10 | A proposal to bump | Upstream is on v2.9.7. |
 | Hold | T42, the Tetra3D option types | A proposal issue | Yes | It breaks the API. |
-| Fork only | T27, T28, T29 to T36, T43, T44, T47 | None | Not applicable | They need the Ebitengine fork or are diagnostics. |
+| Fork only | T27, T28, T29 to T36, T43, T44, T47, T59 | None | Not applicable | They need the Ebitengine fork or are diagnostics. |
 
 The numbers that the fork recorded for T45 (about -4.4% frame time, with T43 and T44, in `docs/devlog/079` of the game) and T49 (`docs/devlog/081`) come from the fork with its fork-only patches. They are not evidence for upstream.
